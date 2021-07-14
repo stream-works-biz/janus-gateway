@@ -173,6 +173,7 @@ declare namespace JanusJS {
 		static warn(...args: any[]): void;
 		static error(...args: any[]): void;
 		static randomString(length: number): string;
+		static listDevices(callback: (devices: MediaDeviceInfo[]) => void, config?: { audio: boolean, video: boolean } | null): void;
 		static attachMediaStream(element: HTMLMediaElement, stream: MediaStream): void;
 		static reattachMediaStream(to: HTMLMediaElement, from: HTMLMediaElement): void;
 
