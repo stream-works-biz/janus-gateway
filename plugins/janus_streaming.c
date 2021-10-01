@@ -4957,6 +4957,8 @@ done:
 				g_strlcat(sdptemp, "a=sendonly\r\n", 2048);
 				g_snprintf(buffer, 512, "a=extmap:%d %s\r\n", 1, JANUS_RTP_EXTMAP_MID);
 				g_strlcat(sdptemp, buffer, 2048);
+				g_snprintf(buffer, 512, "a=extmap:%d %s\r\n", 2, JANUS_RTP_EXTMAP_ABS_SEND_TIME);
+				g_strlcat(sdptemp, buffer, 2048);
 			}
 #ifdef HAVE_SCTP
 			if(mp->data && session->data) {
@@ -7056,7 +7058,7 @@ janus_streaming_mountpoint *janus_streaming_create_rtsp_source(
 		JANUS_LOG(LOG_VERB, "Missing name, will generate a random one...\n");
 		memset(tempname, 0, 255);
 		g_snprintf(tempname, 255, "%s", id_str);
-	} else if(atoi(name) != 0) {
+	} else if(name[0] == '0' || atoi(name) != 0) {
 		JANUS_LOG(LOG_VERB, "Names can't start with a number, prefixing it...\n");
 		memset(tempname, 0, 255);
 		g_snprintf(tempname, 255, "mp-%s", name);

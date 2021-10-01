@@ -44,6 +44,11 @@ declare namespace JanusJS {
 		error?: (error: any) => void;
 		destroyed?: Function;
 	}
+	
+	interface ReconnectOptions {
+		success?: Function;
+		error?: (error: any) => void;
+	}
 
 	enum MessageType {
 		Recording = 'recording',
@@ -183,6 +188,7 @@ declare namespace JanusJS {
 		isConnected(): boolean;
 		getSessionId(): string;
 		attach(options: PluginOptions): void;
+		reconnect(options: ReconnectOptions): void;
 		destroy(): void;
 	}
 }

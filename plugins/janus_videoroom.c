@@ -356,9 +356,9 @@ room-<unique room ID>: {
 }
 \endverbatim
  *
- * To get a list of the available rooms (excluded those configured or
- * created as private rooms) you can make use of the \c list request,
- * which has to be formatted as follows:
+ * To get a list of the available rooms you can make use of the \c list request.
+ * \c admin_key is optional. If included and correct, rooms configured/created
+ * as private will be included in the list as well.
  *
 \verbatim
 {
@@ -376,16 +376,29 @@ room-<unique room ID>: {
 			"room" : <unique numeric ID>,
 			"description" : "<Name of the room>",
 			"pin_required" : <true|false, whether a PIN is required to join this room>,
+			"is_private" : <true|false, whether this room is 'private' (as in hidden) or not>,
 			"max_publishers" : <how many publishers can actually publish via WebRTC at the same time>,
 			"bitrate" : <bitrate cap that should be forced (via REMB) on all publishers by default>,
-			"bitrate_cap" : <true|false, whether the above cap should act as a limit to dynamic bitrate changes by publishers>,
+			"bitrate_cap" : <true|false, whether the above cap should act as a limit to dynamic bitrate changes by publishers (optional)>,
 			"fir_freq" : <how often a keyframe request is sent via PLI/FIR to active publishers>,
+			"require_pvtid": <true|false, whether subscriptions in this room require a private_id>,
+			"require_e2ee": <true|false, whether end-to-end encrypted publishers are required>,
+			"notify_joining": <true|false, whether an event is sent to notify all participants if a new participant joins the room>,
 			"audiocodec" : "<comma separated list of allowed audio codecs>",
 			"videocodec" : "<comma separated list of allowed video codecs>",
+			"opus_fec": <true|false, whether inband FEC must be negotiated (note: only available for Opus) (optional)>,
+			"video_svc": <true|false, whether SVC must be done for video (note: only available for VP9 right now) (optional)>,
 			"record" : <true|false, whether the room is being recorded>,
-			"record_dir" : "<if recording, the path where the .mjr files are being saved>",
+			"rec_dir" : "<if recording, the path where the .mjr files are being saved>",
 			"lock_record" : <true|false, whether the room recording state can only be changed providing the secret>,
 			"num_participants" : <count of the participants (publishers, active or not; not subscribers)>
+			"audiolevel_ext": <true|false, whether the ssrc-audio-level extension must be negotiated or not for new publishers>,
+			"audiolevel_event": <true|false, whether to emit event to other users about audiolevel>,
+			"audio_active_packets": <amount of packets with audio level for checkup (optional, only if audiolevel_event is true)>,
+			"audio_level_average": <average audio level (optional, only if audiolevel_event is true)>,
+			"videoorient_ext": <true|false, whether the video-orientation extension must be negotiated or not for new publishers>,
+			"playoutdelay_ext": <true|false, whether the playout-delay extension must be negotiated or not for new publishers>,
+			"transport_wide_cc_ext": <true|false, whether the transport wide cc extension must be negotiated or not for new publishers>
 		},
 		// Other rooms
 	]
@@ -3766,6 +3779,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 				json_object_set_new(rl, "room", string_ids ? json_string(room->room_id_str) : json_integer(room->room_id));
 				json_object_set_new(rl, "description", json_string(room->room_name));
 				json_object_set_new(rl, "pin_required", room->room_pin ? json_true() : json_false());
+				json_object_set_new(rl, "is_private", room->is_private ? json_true() : json_false());
 				json_object_set_new(rl, "max_publishers", json_integer(room->max_publishers));
 				json_object_set_new(rl, "bitrate", json_integer(room->bitrate));
 				if(room->bitrate_cap)
@@ -3786,7 +3800,6 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 				json_object_set_new(rl, "record", room->record ? json_true() : json_false());
 				json_object_set_new(rl, "rec_dir", json_string(room->rec_dir));
 				json_object_set_new(rl, "lock_record", room->lock_record ? json_true() : json_false());
-				/* TODO: Should we list participants as well? or should there be a separate API call on a specific room for this? */
 				json_object_set_new(rl, "num_participants", json_integer(g_hash_table_size(room->participants)));
 				json_object_set_new(rl, "audiolevel_ext", room->audiolevel_ext ? json_true() : json_false());
 				json_object_set_new(rl, "audiolevel_event", room->audiolevel_event ? json_true() : json_false());
@@ -6189,7 +6202,6 @@ static void *janus_videoroom_handler(void *data) {
 						publisher->pvt_id = 0;
 					}
 				}
-				g_hash_table_insert(publisher->room->private_ids, GUINT_TO_POINTER(publisher->pvt_id), publisher);
 				g_atomic_int_set(&publisher->destroyed, 0);
 				janus_refcount_init(&publisher->ref, janus_videoroom_publisher_free);
 				/* In case we also wanted to configure */
@@ -6209,6 +6221,8 @@ static void *janus_videoroom_handler(void *data) {
 							acodec != publisher->room->acodec[4])) {
 						JANUS_LOG(LOG_ERR, "Participant asked for audio codec '%s', but it's not allowed (room %s, user %s)\n",
 							json_string_value(audiocodec), publisher->room_id_str, publisher->user_id_str);
+						janus_mutex_unlock(&publisher->room->mutex);
+						janus_refcount_decrease(&publisher->room->ref);
 						janus_refcount_decrease(&publisher->ref);
 						error_code = JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT;
 						g_snprintf(error_cause, 512, "Audio codec unavailable in this room");
@@ -6234,6 +6248,8 @@ static void *janus_videoroom_handler(void *data) {
 							vcodec != publisher->room->vcodec[4])) {
 						JANUS_LOG(LOG_ERR, "Participant asked for video codec '%s', but it's not allowed (room %s, user %s)\n",
 							json_string_value(videocodec), publisher->room_id_str, publisher->user_id_str);
+						janus_mutex_unlock(&publisher->room->mutex);
+						janus_refcount_decrease(&publisher->room->ref);
 						janus_refcount_decrease(&publisher->ref);
 						error_code = JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT;
 						g_snprintf(error_cause, 512, "Video codec unavailable in this room");
@@ -6298,6 +6314,7 @@ static void *janus_videoroom_handler(void *data) {
 				g_hash_table_insert(publisher->room->participants,
 					string_ids ? (gpointer)g_strdup(publisher->user_id_str) : (gpointer)janus_uint64_dup(publisher->user_id),
 					publisher);
+				g_hash_table_insert(publisher->room->private_ids, GUINT_TO_POINTER(publisher->pvt_id), publisher);
 				janus_mutex_unlock(&session->mutex);
 				g_hash_table_iter_init(&iter, publisher->room->participants);
 				while (!g_atomic_int_get(&publisher->room->destroyed) && g_hash_table_iter_next(&iter, NULL, &value)) {
@@ -7695,14 +7712,14 @@ static void *janus_videoroom_handler(void *data) {
 						break;
 					mid_ext_id++;
 				}
-				int twcc_ext_id = 1;
-				while(twcc_ext_id < 15) {
-					if(twcc_ext_id != mid_ext_id &&
-							twcc_ext_id != participant->audio_level_extmap_id &&
-							twcc_ext_id != participant->video_orient_extmap_id &&
-							twcc_ext_id != participant->playout_delay_extmap_id)
+				int abs_send_time_ext_id = 1;
+				while(abs_send_time_ext_id < 15) {
+					if(abs_send_time_ext_id != mid_ext_id &&
+							abs_send_time_ext_id != participant->audio_level_extmap_id &&
+							abs_send_time_ext_id != participant->video_orient_extmap_id &&
+							abs_send_time_ext_id != participant->playout_delay_extmap_id)
 						break;
-					twcc_ext_id++;
+					abs_send_time_ext_id++;
 				}
 				offer = janus_sdp_generate_offer(s_name, answer->c_addr,
 					JANUS_SDP_OA_AUDIO, participant->audio,
@@ -7723,8 +7740,7 @@ static void *janus_videoroom_handler(void *data) {
 						participant->video_orient_extmap_id > 0 ? participant->video_orient_extmap_id : 0,
 					JANUS_SDP_OA_VIDEO_EXTENSION, JANUS_RTP_EXTMAP_PLAYOUT_DELAY,
 						participant->playout_delay_extmap_id > 0 ? participant->playout_delay_extmap_id : 0,
-					JANUS_SDP_OA_VIDEO_EXTENSION, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC,
-						videoroom->transport_wide_cc_ext ? twcc_ext_id : 0,
+					JANUS_SDP_OA_VIDEO_EXTENSION, JANUS_RTP_EXTMAP_ABS_SEND_TIME, abs_send_time_ext_id,
 					JANUS_SDP_OA_DATA, participant->data,
 					JANUS_SDP_OA_DONE);
 				/* Is this room recorded, or are we recording this publisher already? */

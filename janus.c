@@ -25,6 +25,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <poll.h>
+
+#include <openssl/rand.h>
 #ifdef HAVE_TURNRESTAPI
 #include <curl/curl.h>
 #endif
@@ -96,6 +98,7 @@ static struct janus_json_parameter incoming_request_parameters[] = {
 static struct janus_json_parameter attach_parameters[] = {
 	{"plugin", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
 	{"opaque_id", JSON_STRING, 0},
+	{"loop_index", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE},
 };
 static struct janus_json_parameter body_parameters[] = {
 	{"body", JSON_OBJECT, JANUS_JSON_PARAM_REQUIRED}
@@ -105,6 +108,7 @@ static struct janus_json_parameter jsep_parameters[] = {
 	{"sdp", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
 	{"trickle", JANUS_JSON_BOOL, 0},
 	{"rid_order", JSON_STRING, 0},
+	{"force_relay", JANUS_JSON_BOOL, 0},
 	{"e2ee", JANUS_JSON_BOOL, 0}
 };
 static struct janus_json_parameter add_token_parameters[] = {
@@ -373,7 +377,11 @@ static json_t *janus_info(const char *transaction) {
 		g_snprintf(server, 255, "%s:%"SCNu16, janus_ice_get_turn_server(), janus_ice_get_turn_port());
 		json_object_set_new(info, "turn-server", json_string(server));
 	}
+	if(janus_ice_is_force_relay_allowed())
+		json_object_set_new(info, "allow-force-relay", json_true());
 	json_object_set_new(info, "static-event-loops", json_integer(janus_ice_get_static_event_loops()));
+	if(janus_ice_get_static_event_loops())
+		json_object_set_new(info, "loop-indication", janus_ice_is_loop_indication_allowed() ? json_true() : json_false());
 	json_object_set_new(info, "api_secret", api_secret ? json_true() : json_false());
 	json_object_set_new(info, "auth_token", janus_auth_is_enabled() ? json_true() : json_false());
 	json_object_set_new(info, "event_handlers", janus_events_is_enabled() ? json_true() : json_false());
@@ -1189,6 +1197,8 @@ int janus_process_incoming_request(janus_request *request) {
 		}
 		json_t *opaque = json_object_get(root, "opaque_id");
 		const char *opaque_id = opaque ? json_string_value(opaque) : NULL;
+		json_t *loop = json_object_get(root, "loop_index");
+		int loop_index = loop ? json_integer_value(loop) : -1;
 		/* Create handle */
 		handle = janus_ice_handle_create(session, opaque_id, token_value);
 		if(handle == NULL) {
@@ -1200,7 +1210,7 @@ int janus_process_incoming_request(janus_request *request) {
 		janus_refcount_increase(&handle->ref);
 		/* Attach to the plugin */
 		int error = 0;
-		if((error = janus_ice_handle_attach_plugin(session, handle, plugin_t)) != 0) {
+		if((error = janus_ice_handle_attach_plugin(session, handle, plugin_t, loop_index)) != 0) {
 			/* TODO Make error struct to pass verbose information */
 			janus_session_handles_remove(session, handle);
 			JANUS_LOG(LOG_ERR, "Couldn't attach to plugin '%s', error '%d'\n", plugin_text, error);
@@ -1473,6 +1483,20 @@ int janus_process_incoming_request(janus_request *request) {
 						goto jsondone;
 					}
 				}
+				/* If for some reason the user is asking us to force using a relay, do that. Notice
+				 * that this only works with libnice >= 0.1.14, and will cause the PeerConnection
+				 * to fail if Janus itself is not configured to use a TURN server. Don't use this
+				 * feature if you don't know what you're doing! You will almost always NOT want
+				 * Janus itself to use TURN: https://janus.conf.meetecho.com/docs/FAQ.html#turn */
+				if(json_is_true(json_object_get(jsep, "force_relay"))) {
+					if(!janus_ice_is_force_relay_allowed()) {
+						JANUS_LOG(LOG_WARN, "[%"SCNu64"] Forcing Janus to use a TURN server is not allowed\n", handle->handle_id);
+					} else {
+						JANUS_LOG(LOG_VERB, "[%"SCNu64"] Forcing Janus to use a TURN server\n", handle->handle_id);
+						g_object_set(G_OBJECT(handle->agent), "force-relay", TRUE, NULL);
+					}
+				}
+				/* Process the remote SDP */
 				if(janus_sdp_process(handle, parsed_sdp, rids_hml, FALSE) < 0) {
 					JANUS_LOG(LOG_ERR, "Error processing SDP\n");
 					janus_sdp_destroy(parsed_sdp);
@@ -1490,6 +1514,34 @@ int janus_process_incoming_request(janus_request *request) {
 						janus_flags_clear(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_TRICKLE);
 					}
 					janus_request_ice_handle_answer(handle, audio, video, data, jsep_sdp);
+					/* Check if the answer does contain the mid/abs-send-time/twcc extmaps */
+					gboolean do_mid = FALSE, do_twcc = FALSE, do_abs_send_time = FALSE;
+					GList *temp = parsed_sdp->m_lines;
+					while(temp) {
+						janus_sdp_mline *m = (janus_sdp_mline *)temp->data;
+						GList *tempA = m->attributes;
+						while(tempA) {
+							janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
+							if(a->name && a->value && !strcasecmp(a->name, "extmap")) {
+								if(strstr(a->value, JANUS_RTP_EXTMAP_MID))
+									do_mid = TRUE;
+								else if(strstr(a->value, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC))
+									do_twcc = TRUE;
+								else if(strstr(a->value, JANUS_RTP_EXTMAP_ABS_SEND_TIME))
+									do_abs_send_time = TRUE;
+							}
+							tempA = tempA->next;
+						}
+						temp = temp->next;
+					}
+					if(!do_mid && handle->stream)
+						handle->stream->mid_ext_id = 0;
+					if(!do_twcc && handle->stream) {
+						handle->stream->do_transport_wide_cc = FALSE;
+						handle->stream->transport_wide_cc_ext_id = 0;
+					}
+					if(!do_abs_send_time && handle->stream)
+						handle->stream->abs_send_time_ext_id = 0;
 				} else {
 					/* Check if the mid RTP extension is being negotiated */
 					handle->stream->mid_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_MID);
@@ -1500,6 +1552,8 @@ int janus_process_incoming_request(janus_request *request) {
 					handle->stream->audiolevel_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_AUDIO_LEVEL);
 					/* Check if the video orientation ID extension is being negotiated */
 					handle->stream->videoorientation_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION);
+					/* Check if the abs-send-time ID extension is being negotiated */
+					handle->stream->abs_send_time_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_ABS_SEND_TIME);
 					/* Check if transport wide CC is supported */
 					int transport_wide_cc_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC);
 					handle->stream->do_transport_wide_cc = transport_wide_cc_ext_id > 0 ? TRUE : FALSE;
@@ -1520,16 +1574,16 @@ int janus_process_incoming_request(janus_request *request) {
 				}
 				if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ICE_RESTART)) {
 					JANUS_LOG(LOG_INFO, "[%"SCNu64"] Restarting ICE...\n", handle->handle_id);
-					/* Update remote credentials for ICE */
-					if(handle->stream) {
-						nice_agent_set_remote_credentials(handle->agent, handle->stream->stream_id,
-							handle->stream->ruser, handle->stream->rpass);
-					}
 					/* FIXME We only need to do that for offers: if it's an answer, we did that already */
 					if(offer) {
 						janus_ice_restart(handle);
 					} else {
 						janus_flags_clear(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ICE_RESTART);
+					}
+					/* Update remote credentials for ICE */
+					if(handle->stream) {
+						nice_agent_set_remote_credentials(handle->agent, handle->stream->stream_id,
+							handle->stream->ruser, handle->stream->rpass);
 					}
 					/* If we're full-trickling, we'll need to resend the candidates later */
 					if(janus_ice_is_full_trickle_enabled()) {
@@ -1561,6 +1615,8 @@ int janus_process_incoming_request(janus_request *request) {
 					handle->stream->audiolevel_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_AUDIO_LEVEL);
 					/* Check if the video orientation ID extension is being negotiated */
 					handle->stream->videoorientation_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION);
+					/* Check if the abs-send-time ID extension is being negotiated */
+					handle->stream->abs_send_time_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_ABS_SEND_TIME);
 					/* Check if transport wide CC is supported */
 					int transport_wide_cc_ext_id = janus_rtp_header_extension_get_id(jsep_sdp, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC);
 					handle->stream->do_transport_wide_cc = transport_wide_cc_ext_id > 0 ? TRUE : FALSE;
@@ -3049,6 +3105,8 @@ json_t *janus_admin_stream_summary(janus_ice_stream *stream) {
 		json_object_set_new(se, JANUS_RTP_EXTMAP_RID, json_integer(stream->rid_ext_id));
 	if(stream->ridrtx_ext_id > 0)
 		json_object_set_new(se, JANUS_RTP_EXTMAP_REPAIRED_RID, json_integer(stream->ridrtx_ext_id));
+	if(stream->abs_send_time_ext_id > 0)
+		json_object_set_new(se, JANUS_RTP_EXTMAP_ABS_SEND_TIME, json_integer(stream->abs_send_time_ext_id));
 	if(stream->transport_wide_cc_ext_id > 0)
 		json_object_set_new(se, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC, json_integer(stream->transport_wide_cc_ext_id));
 	if(stream->audiolevel_ext_id > 0)
@@ -3650,7 +3708,8 @@ json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plug
 			}
 		}
 		/* Make sure we don't send the rid/repaired-rid attributes when offering ourselves */
-		int mid_ext_id = 0, transport_wide_cc_ext_id = 0, audiolevel_ext_id = 0, videoorientation_ext_id = 0;
+		int mid_ext_id = 0, transport_wide_cc_ext_id = 0, abs_send_time_ext_id = 0,
+			audiolevel_ext_id = 0, videoorientation_ext_id = 0;
 		GList *temp = parsed_sdp->m_lines;
 		while(temp) {
 			janus_sdp_mline *m = (janus_sdp_mline *)temp->data;
@@ -3662,6 +3721,8 @@ json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plug
 						mid_ext_id = atoi(a->value);
 					else if(strstr(a->value, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC))
 						transport_wide_cc_ext_id = atoi(a->value);
+					else if(strstr(a->value, JANUS_RTP_EXTMAP_ABS_SEND_TIME))
+						abs_send_time_ext_id = atoi(a->value);
 					else if(strstr(a->value, JANUS_RTP_EXTMAP_AUDIO_LEVEL))
 						audiolevel_ext_id = atoi(a->value);
 					else if(strstr(a->value, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION))
@@ -3684,26 +3745,33 @@ json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plug
 			ice_handle->stream->do_transport_wide_cc = transport_wide_cc_ext_id > 0 ? TRUE : FALSE;
 			ice_handle->stream->transport_wide_cc_ext_id = transport_wide_cc_ext_id;
 		}
+		if(ice_handle->stream && ice_handle->stream->abs_send_time_ext_id != abs_send_time_ext_id)
+			ice_handle->stream->abs_send_time_ext_id = abs_send_time_ext_id;
 		if(ice_handle->stream && ice_handle->stream->audiolevel_ext_id != audiolevel_ext_id)
 			ice_handle->stream->audiolevel_ext_id = audiolevel_ext_id;
 		if(ice_handle->stream && ice_handle->stream->videoorientation_ext_id != videoorientation_ext_id)
 			ice_handle->stream->videoorientation_ext_id = videoorientation_ext_id;
 	} else {
-		/* Check if the answer does contain the mid/rid/repaired-rid attributes */
-		gboolean do_mid = FALSE, do_rid = FALSE, do_repaired_rid = FALSE;
+		/* Check if the answer does contain the mid/rid/repaired-rid/abs-send-time/twcc extmaps */
+		gboolean do_mid = FALSE, do_rid = FALSE, do_repaired_rid = FALSE,
+			do_twcc = FALSE, do_abs_send_time = FALSE;
 		GList *temp = parsed_sdp->m_lines;
 		while(temp) {
 			janus_sdp_mline *m = (janus_sdp_mline *)temp->data;
 			GList *tempA = m->attributes;
 			while(tempA) {
 				janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
-				if(a->name && a->value) {
+				if(a->name && a->value && !strcasecmp(a->name, "extmap")) {
 					if(strstr(a->value, JANUS_RTP_EXTMAP_MID))
 						do_mid = TRUE;
 					else if(strstr(a->value, JANUS_RTP_EXTMAP_RID))
 						do_rid = TRUE;
 					else if(strstr(a->value, JANUS_RTP_EXTMAP_REPAIRED_RID))
 						do_repaired_rid = TRUE;
+					else if(strstr(a->value, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC))
+						do_twcc = TRUE;
+					else if(strstr(a->value, JANUS_RTP_EXTMAP_ABS_SEND_TIME))
+						do_abs_send_time = TRUE;
 				}
 				tempA = tempA->next;
 			}
@@ -3727,6 +3795,12 @@ json_t *janus_plugin_handle_sdp(janus_plugin_session *plugin_session, janus_plug
 		}
 		if(!do_repaired_rid && ice_handle->stream)
 			ice_handle->stream->ridrtx_ext_id = 0;
+		if(!do_twcc && ice_handle->stream) {
+			ice_handle->stream->do_transport_wide_cc = FALSE;
+			ice_handle->stream->transport_wide_cc_ext_id = 0;
+		}
+		if(!do_abs_send_time && ice_handle->stream)
+			ice_handle->stream->abs_send_time_ext_id = 0;
 	}
 	if(!updating && !janus_ice_is_full_trickle_enabled()) {
 		/* Wait for candidates-done callback */
@@ -4822,10 +4896,22 @@ gint main(int argc, char *argv[])
 		}
 	}
 #endif
+	item = janus_config_get(config, config_nat, janus_config_type_item, "allow_force_relay");
+	if(item && item->value && janus_is_true(item->value)) {
+		JANUS_LOG(LOG_WARN, "Note: applications/users will be allowed to force Janus to use TURN. Make sure you know what you're doing!\n");
+		janus_ice_allow_force_relay();
+	}
 	/* Do we need a limited number of static event loops, or is it ok to have one per handle (the default)? */
 	item = janus_config_get(config, config_general, janus_config_type_item, "event_loops");
-	if(item && item->value)
-		janus_ice_set_static_event_loops(atoi(item->value));
+	if(item && item->value) {
+		int loops = atoi(item->value);
+		/* Check if we should allow API calls to specify which loops to use for new handles */
+		gboolean loops_api = FALSE;
+		item = janus_config_get(config, config_general, janus_config_type_item, "allow_loop_indication");
+		if(item && item->value)
+			loops_api = janus_is_true(item->value);
+		janus_ice_set_static_event_loops(loops, loops_api);
+	}
 	/* Initialize the ICE stack now */
 	janus_ice_init(ice_lite, ice_tcp, full_trickle, ignore_mdns, ipv6, ipv6_linklocal, rtp_min_port, rtp_max_port);
 	if(janus_ice_set_stun_server(stun_server, stun_port) < 0) {
@@ -4996,6 +5082,11 @@ gint main(int argc, char *argv[])
 	SSL_library_init();
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
+	/* Check if random pool looks ok (this does not give any guarantees for later, though) */
+	if(RAND_status() != 1) {
+		JANUS_LOG(LOG_FATAL, "Random pool is not properly seeded, cannot generate random numbers\n");
+		exit(1);
+	}
 	/* ... and DTLS-SRTP in particular */
 	const char *dtls_ciphers = NULL;
 	item = janus_config_get(config, config_certs, janus_config_type_item, "dtls_ciphers");
