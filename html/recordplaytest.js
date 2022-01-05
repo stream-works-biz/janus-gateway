@@ -423,11 +423,11 @@ function updateRecsList() {
 			Janus.debug("Got a list of available recordings:", list);
 			for(var mp in list) {
 				Janus.debug("  >> [" + list[mp]["id"] + "] " + list[mp]["name"] + " (" + list[mp]["date"] + ")");
-				$('#recslist').append("<li><a href='#' id='" + list[mp]["id"] + "'>" + list[mp]["name"] + " [" + list[mp]["date"] + "]" + "</a></li>");
+				$('#recslist').append("<li><a href='#' id='" + list[mp]["id"] + "'>" + escapeXmlTags(list[mp]["name"]) + " [" + list[mp]["date"] + "]" + "</a></li>");
 			}
 			$('#recslist a').unbind('click').click(function() {
 				selectedRecording = $(this).attr("id");
-				selectedRecordingInfo = $(this).text();
+				selectedRecordingInfo = escapeXmlTags($(this).text());
 				$('#recset').html($(this).html()).parent().removeClass('open');
 				$('#play').removeAttr('disabled').click(startPlayout);
 				return false;
@@ -453,6 +453,7 @@ function startRecording() {
 		$('#list').unbind('click').attr('disabled', true);
 		$('#recset').attr('disabled', true);
 		$('#recslist').attr('disabled', true);
+		$('#pause-resume').removeClass('hide');
 
 		// bitrate and keyframe interval can be set at any time:
 		// before, after, during recording
@@ -497,6 +498,15 @@ function startRecording() {
 					recordplay.hangup();
 				}
 			});
+		$('#pause-resume').unbind('click').on('click', function() {
+			if($(this).text() === 'Pause') {
+				recordplay.send({message: {request: 'pause'}});
+				$(this).text('Resume');
+			} else {
+				recordplay.send({message: {request: 'resume'}});
+				$(this).text('Pause');
+			}
+		});
 	});
 }
 
@@ -515,6 +525,7 @@ function startPlayout() {
 	$('#list').unbind('click').attr('disabled', true);
 	$('#recset').attr('disabled', true);
 	$('#recslist').attr('disabled', true);
+	$('#pause-resume').addClass('hide');
 	var play = { request: "play", id: parseInt(selectedRecording) };
 	recordplay.send({ message: play });
 }
@@ -533,4 +544,13 @@ function getQueryStringValue(name) {
 	var regex = new RegExp("[\\?&]" + name + "=([^&#]*)"),
 		results = regex.exec(location.search);
 	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+}
+
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
 }

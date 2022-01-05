@@ -201,6 +201,14 @@ void janus_ice_set_event_stats_period(int period);
 /*! \brief Method to get the current event handler statistics period (see above)
  * @returns The current event handler stats period */
 int janus_ice_get_event_stats_period(void);
+
+/*! \brief Method to define wether the media stats shall be dispatched in one event (true) or in dedicated single events (false - default)
+ * @param[in] combine_media_stats_to_one_event true to combine media statistics in on event or false to send dedicated events */
+void janus_ice_event_set_combine_media_stats(gboolean combine_media_stats_to_one_event);
+/*! \brief Method to retrieve wether media statistic events shall be dispatched combined or in single events
+ * @returns true to combine events */
+gboolean janus_ice_event_get_combine_media_stats(void);
+
 /*! \brief Method to check whether libnice debugging has been enabled (http://nice.freedesktop.org/libnice/libnice-Debug-messages.html)
  * @returns True if libnice debugging is enabled, FALSE otherwise */
 gboolean janus_ice_is_ice_debugging_enabled(void);
@@ -442,6 +450,8 @@ struct janus_ice_stream {
 	janus_rtcp_context *audio_rtcp_ctx;
 	/*! \brief RTCP context(s) for the video stream (may be simulcasting) */
 	janus_rtcp_context *video_rtcp_ctx[3];
+	/*! \brief Latest REMB feedback we received */
+	uint32_t remb_bitrate;
 	/*! \brief Size of the NACK queue (in ms), dynamically updated per the RTT */
 	uint16_t nack_queue_ms;
 	/*! \brief Map(s) of the NACKed packets (to track retransmissions and avoid duplicates) */
@@ -687,6 +697,9 @@ void janus_ice_relay_sctp(janus_ice_handle *handle, char *buffer, int length);
 /*! \brief Plugin SCTP/DataChannel callback, called by the SCTP stack when data can be written
  * @param[in] handle The Janus ICE handle associated with the peer */
 void janus_ice_notify_data_ready(janus_ice_handle *handle);
+/*! \brief Core SDP callback, called by the SDP stack when a stream has been paused by a negotiation
+ * @param[in] handle The Janus ICE handle associated with the peer */
+void janus_ice_notify_media_stopped(janus_ice_handle *handle);
 ///@}
 
 

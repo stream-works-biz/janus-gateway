@@ -50,6 +50,14 @@ declare namespace JanusJS {
 		error?: (error: any) => void;
 	}
 
+	interface DestroyOptions {
+		cleanupHandles?: boolean
+		notifyDestroyed?: boolean
+		unload?: boolean
+		success?: () => void
+		error?: (error: Error | unknown) => void
+	}
+
 	enum MessageType {
 		Recording = 'recording',
 		Starting = 'starting',
@@ -72,13 +80,14 @@ declare namespace JanusJS {
 	interface PluginOptions {
 		plugin: string;
 		opaqueId?: string;
+		dataChannelOptions?: RTCDataChannelInit;
 		success?: (handle: PluginHandle) => void;
 		error?: (error: any) => void;
 		consentDialog?: (on: boolean) => void;
 		webrtcState?: (isConnected: boolean) => void;
-		iceState?: (state: 'connected' | 'failed') => void;
+		iceState?: (state: 'connected' | 'failed' | 'disconnected' | 'closed') => void;
 		mediaState?: (medium: 'audio' | 'video', receiving: boolean, mid?: number) => void;
-		slowLink?: (state: { uplink: boolean }) => void;
+		slowLink?: (uplink: boolean, lost: number) => void;
 		onmessage?: (message: Message, jsep?: JSEP) => void;
 		onlocalstream?: (stream: MediaStream) => void;
 		onremotestream?: (stream: MediaStream) => void;
@@ -138,6 +147,7 @@ declare namespace JanusJS {
 			mySdp: any,
 			mediaConstraints: any,
 			pc: RTCPeerConnection,
+			dataChannelOptions: RTCDataChannelInit,
 			dataChannel: Array<RTCDataChannel>,
 			dtmfSender: any,
 			trickle: boolean,
@@ -189,7 +199,7 @@ declare namespace JanusJS {
 		getSessionId(): string;
 		attach(options: PluginOptions): void;
 		reconnect(options: ReconnectOptions): void;
-		destroy(): void;
+		destroy(options: DestroyOptions): void;
 	}
 }
 

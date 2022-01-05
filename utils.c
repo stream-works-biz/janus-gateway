@@ -272,6 +272,34 @@ char *janus_string_replace(char *message, const char *old_string, const char *ne
 	}
 }
 
+size_t janus_strlcat(char *dest, const char *src, size_t dest_size) {
+	size_t ret = g_strlcat(dest, src, dest_size);
+	if(ret >= dest_size)
+		JANUS_LOG(LOG_ERR, "Truncation occurred, %lu >= %lu\n", ret, dest_size);
+	return ret;
+}
+
+int janus_strlcat_fast(char *dest, const char *src, size_t dest_size, size_t *offset) {
+	if(dest == NULL || src == NULL || offset == NULL) {
+		JANUS_LOG(LOG_ERR, "Invalid arguments\n");
+		return -1;
+	}
+	if(*offset >= dest_size) {
+		JANUS_LOG(LOG_ERR, "Offset is beyond the buffer size\n");
+		return -2;
+	}
+	char *p = memccpy(dest + *offset, src, 0, dest_size - *offset);
+	if(p == NULL) {
+		JANUS_LOG(LOG_ERR, "Truncation occurred, %lu >= %lu\n",
+			*offset + strlen(src), dest_size);
+		*offset = dest_size;
+		*(dest + dest_size -1) = '\0';
+		return -3;
+	}
+	*offset = (p - dest - 1);
+	return 0;
+}
+
 int janus_mkdir(const char *dir, mode_t mode) {
 	char tmp[256];
 	char *p = NULL;
@@ -590,22 +618,22 @@ void janus_get_json_type_name(int jtype, unsigned int flags, char *type_name) {
 	}
 	switch(jtype) {
 		case JSON_TRUE:
-			g_strlcat(type_name, "boolean", req_size);
+			janus_strlcat(type_name, "boolean", req_size);
 			break;
 		case JSON_INTEGER:
-			g_strlcat(type_name, "integer", req_size);
+			janus_strlcat(type_name, "integer", req_size);
 			break;
 		case JSON_REAL:
-			g_strlcat(type_name, "real", req_size);
+			janus_strlcat(type_name, "real", req_size);
 			break;
 		case JSON_STRING:
-			g_strlcat(type_name, "string", req_size);
+			janus_strlcat(type_name, "string", req_size);
 			break;
 		case JSON_ARRAY:
-			g_strlcat(type_name, "array", req_size);
+			janus_strlcat(type_name, "array", req_size);
 			break;
 		case JSON_OBJECT:
-			g_strlcat(type_name, "object", req_size);
+			janus_strlcat(type_name, "object", req_size);
 			break;
 		default:
 			break;

@@ -74,7 +74,6 @@ int janus_pp_h264_create(char *destination, char *metadata, gboolean faststart, 
 		return -1;
 	}
 	fctx->video_codec = codec;
-	fctx->oformat->video_codec = codec->id;
 	vStream = avformat_new_stream(fctx, codec);
 	vStream->id = fctx->nb_streams-1;
 	vEncoder = avcodec_alloc_context3(codec);
@@ -305,7 +304,8 @@ int janus_pp_h264_preprocess(FILE *file, janus_pp_frame_packet *list) {
 		}
 		if(tmp->rotation != -1 && tmp->rotation != rotation) {
 			rotation = tmp->rotation;
-			JANUS_LOG(LOG_INFO, "Video rotation: %d degrees\n", rotation);
+			double ts = (double)(tmp->ts-list->ts)/(double)90000;
+			JANUS_LOG(LOG_INFO, "[%8.3fs] Video rotation: %d degrees\n", ts, rotation);
 		}
 		tmp = tmp->next;
 	}
