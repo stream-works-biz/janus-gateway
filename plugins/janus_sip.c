@@ -853,6 +853,7 @@ static uint16_t rtp_range_min = 10000;
 static uint16_t rtp_range_max = 60000;
 static int dscp_audio_rtp = 0;
 static int dscp_video_rtp = 0;
+static char *sips_certs_dir = NULL;
 
 static gboolean query_contact_header = FALSE;
 
@@ -1936,6 +1937,13 @@ int janus_sip_init(janus_callbacks *callback, const char *config_path) {
 			}
 		}
 
+		/* Check if Sofia should find certificates in a custom folder  */
+		item = janus_config_get(config, config_general, janus_config_type_item, "sips_certs_dir");
+		if(item && item->value) {
+			sips_certs_dir = g_strdup(item->value);
+			JANUS_LOG(LOG_VERB, "Sofia SIP certificates folder: %s\n", sips_certs_dir);
+		}
+
 		janus_config_destroy(config);
 	}
 	config = NULL;
@@ -2071,7 +2079,7 @@ void janus_sip_create_session(janus_plugin_session *handle, int *error) {
 	session->account.identity = NULL;
 	session->account.force_udp = FALSE;
 	session->account.force_tcp = FALSE;
-	session->account.sips = TRUE;
+	session->account.sips = FALSE;
 	session->account.rfc2543_cancel = FALSE;
 	session->account.username = NULL;
 	session->account.display_name = NULL;
@@ -2839,7 +2847,7 @@ static void *janus_sip_handler(void *data) {
 				send_register = json_is_true(do_register);
 			}
 
-			gboolean sips = TRUE;
+			gboolean sips = FALSE;
 			json_t *do_sips = json_object_get(root, "sips");
 			if(do_sips != NULL) {
 				sips = json_is_true(do_sips);
@@ -2860,6 +2868,8 @@ static void *janus_sip_handler(void *data) {
 				g_snprintf(error_cause, 512, "Conflicting elements: force_udp and force_tcp cannot both be true");
 				goto error;
 			}
+			if(!force_udp && !force_tcp)
+				force_udp = TRUE;
 			gboolean rfc2543_cancel = FALSE;
 			json_t *do_rfc2543_cancel = json_object_get(root, "rfc2543_cancel");
 			if(do_rfc2543_cancel != NULL) {
@@ -3020,7 +3030,7 @@ static void *janus_sip_handler(void *data) {
 				session->account.identity = NULL;
 				session->account.force_udp = FALSE;
 				session->account.force_tcp = FALSE;
-				session->account.sips = TRUE;
+				session->account.sips = FALSE;
 				session->account.rfc2543_cancel = FALSE;
 				if(session->account.username != NULL)
 					g_free(session->account.username);
@@ -3662,9 +3672,9 @@ static void *janus_sip_handler(void *data) {
 			g_free(session->callee);
 			session->callee = g_strdup(uri_text);
 			janus_mutex_unlock(&session->mutex);
+			janus_mutex_lock(&sessions_mutex);
 			g_free(session->callid);
 			session->callid = callid;
-			janus_mutex_lock(&sessions_mutex);
 			g_hash_table_insert(callids, session->callid, session);
 			janus_mutex_unlock(&sessions_mutex);
 			g_atomic_int_set(&session->establishing, 1);
@@ -4936,13 +4946,13 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 					gateway->notify_event(&janus_sip_plugin, session->handle, info);
 				}
 				/* Get rid of any PeerConnection that may have been set up */
+				janus_mutex_lock(&sessions_mutex);
 				if(session->callid) {
-					janus_mutex_lock(&sessions_mutex);
 					g_hash_table_remove(callids, session->callid);
-					janus_mutex_unlock(&sessions_mutex);
+					g_free(session->callid);
+					session->callid = NULL;
 				}
-				g_free(session->callid);
-				session->callid = NULL;
+				janus_mutex_unlock(&sessions_mutex);
 				g_free(session->transaction);
 				session->transaction = NULL;
 				g_free(session->hangup_reason_header);
@@ -5111,13 +5121,12 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				session->callee = g_strdup(caller_text);
 				janus_mutex_unlock(&session->mutex);
 				su_free(session->stack->s_home, caller_text);
+				janus_mutex_lock(&sessions_mutex);
 				g_free(session->callid);
 				session->callid = sip && sip->sip_call_id ? g_strdup(sip->sip_call_id->i_id) : NULL;
-				if(session->callid) {
-					janus_mutex_lock(&sessions_mutex);
+				if(session->callid)
 					g_hash_table_insert(callids, session->callid, session);
-					janus_mutex_unlock(&sessions_mutex);
-				}
+				janus_mutex_unlock(&sessions_mutex);
 				janus_sip_call_update_status(session, janus_sip_call_status_invited);
 				/* Clean up SRTP stuff from before first, in case it's still needed */
 				janus_sip_srtp_cleanup(session);
@@ -5604,28 +5613,28 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 
 			gboolean in_progress = FALSE;
 			if(status < 200) {
-				/* Not ready yet, either notify the user (e.g., "ringing") or handle early media (if it's a 183) */
-				if(status == 180) {
-					/* Ringing, notify the application */
-					json_t *ringing = json_object();
-					json_object_set_new(ringing, "sip", json_string("event"));
-					json_t *result = json_object();
-					json_object_set_new(result, "event", json_string("ringing"));
-					if(session->incoming_header_prefixes) {
-						json_t *headers = janus_sip_get_incoming_headers(sip, session);
-						json_object_set_new(result, "headers", headers);
-					}
-					json_object_set_new(ringing, "result", result);
-					json_object_set_new(ringing, "call_id", json_string(session->callid));
-					int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, ringing, NULL);
-					JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
-					json_decref(ringing);
-					break;
-				} else if(status == 183) {
+				/* Not ready yet, either notify the user (e.g., "ringing") or handle early media */
+				if(status == 180 || status == 183) {
 					/* If's a Session Progress: check if there's an SDP, and if so, treat it like a 200 */
-					if(!sip->sip_payload || !sip->sip_payload->pl_data)
+					if(sip->sip_payload && sip->sip_payload->pl_data) {
+						in_progress = TRUE;
+					} else {
+						/* Ringing, notify the application */
+						json_t *ringing = json_object();
+						json_object_set_new(ringing, "sip", json_string("event"));
+						json_t *result = json_object();
+						json_object_set_new(result, "event", json_string("ringing"));
+						if(session->incoming_header_prefixes) {
+							json_t *headers = janus_sip_get_incoming_headers(sip, session);
+							json_object_set_new(result, "headers", headers);
+						}
+						json_object_set_new(ringing, "result", result);
+						json_object_set_new(ringing, "call_id", json_string(session->callid));
+						int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, ringing, NULL);
+						JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
+						json_decref(ringing);
 						break;
-					in_progress = TRUE;
+					}
 				} else {
 					/* Nothing to do, let's wait for a 200 OK */
 					break;
@@ -5977,7 +5986,7 @@ auth_failed:
 				session->account.identity = NULL;
 				session->account.force_udp = FALSE;
 				session->account.force_tcp = FALSE;
-				session->account.sips = TRUE;
+				session->account.sips = FALSE;
 				session->account.rfc2543_cancel = FALSE;
 				if(session->account.username != NULL)
 					g_free(session->account.username);
@@ -7040,13 +7049,11 @@ gpointer janus_sip_sofia_thread(gpointer user_data) {
 	char sips_url[128];
 	char *ipv6;
 	ipv6 = strstr(local_ip, ":");
-	if(session->account.force_udp)
-		g_snprintf(sip_url, sizeof(sip_url), "sip:%s%s%s:*;transport=udp", ipv6 ? "[" : "", local_ip, ipv6 ? "]" : "");
-	else if(session->account.force_tcp)
+	if(session->account.force_tcp)
 		g_snprintf(sip_url, sizeof(sip_url), "sip:%s%s%s:*;transport=tcp", ipv6 ? "[" : "", local_ip, ipv6 ? "]" : "");
 	else
-		g_snprintf(sip_url, sizeof(sip_url), "sip:%s%s%s:*", ipv6 ? "[" : "", local_ip, ipv6 ? "]" : "");
-	g_snprintf(sips_url, sizeof(sips_url), "sips:%s%s%s:*", ipv6 ? "[" : "", local_ip, ipv6 ? "]" : "");
+		g_snprintf(sip_url, sizeof(sip_url), "sip:%s%s%s:*;transport=udp", ipv6 ? "[" : "", local_ip, ipv6 ? "]" : "");
+	g_snprintf(sips_url, sizeof(sips_url), "sips:%s%s%s:*;transport=tls", ipv6 ? "[" : "", local_ip, ipv6 ? "]" : "");
 	char outbound_options[256] = "use-rport no-validate";
 	if(keepalive_interval > 0)
 		janus_strlcat(outbound_options, " options-keepalive", sizeof(outbound_options));
@@ -7059,6 +7066,7 @@ gpointer janus_sip_sofia_thread(gpointer user_data) {
 				NUTAG_M_USERNAME(session->account.username),
 				NUTAG_URL(sip_url),
 				TAG_IF(session->account.sips, NUTAG_SIPS_URL(sips_url)),
+				TAG_IF(session->account.sips && sips_certs_dir, NUTAG_CERTIFICATE_DIR(sips_certs_dir)),
 				SIPTAG_USER_AGENT_STR(session->account.user_agent ? session->account.user_agent : user_agent),
 				NUTAG_KEEPALIVE(keepalive_interval * 1000),	/* Sofia expects it in milliseconds */
 				NUTAG_OUTBOUND(outbound_options),
