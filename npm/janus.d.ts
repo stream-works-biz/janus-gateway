@@ -44,18 +44,18 @@ declare namespace JanusJS {
 		error?: (error: any) => void;
 		destroyed?: Function;
 	}
-	
+
 	interface ReconnectOptions {
 		success?: Function;
 		error?: (error: any) => void;
 	}
 
 	interface DestroyOptions {
-		cleanupHandles?: boolean
-		notifyDestroyed?: boolean
-		unload?: boolean
-		success?: () => void
-		error?: (error: Error | unknown) => void
+		cleanupHandles?: boolean;
+		notifyDestroyed?: boolean;
+		unload?: boolean;
+		success?: Function;
+		error?: (error: any) => void;
 	}
 
 	enum MessageType {
@@ -84,7 +84,7 @@ declare namespace JanusJS {
 		success?: (handle: PluginHandle) => void;
 		error?: (error: any) => void;
 		consentDialog?: (on: boolean) => void;
-		webrtcState?: (isConnected: boolean) => void;
+		webrtcState?: (isConnected: boolean, reason?: string) => void;
 		iceState?: (state: 'connected' | 'failed' | 'disconnected' | 'closed') => void;
 		mediaState?: (medium: 'audio' | 'video', receiving: boolean, mid?: number) => void;
 		slowLink?: (uplink: boolean, lost: number) => void;
@@ -138,7 +138,7 @@ declare namespace JanusJS {
 		plugin: string;
 		id: string;
 		token?: string;
-		detached : boolean;
+		detached: boolean;
 		webrtcStuff: {
 			started: boolean,
 			myStream: MediaStream,
@@ -162,7 +162,11 @@ declare namespace JanusJS {
 		send(message: PluginMessage): void;
 		createOffer(params: any): void;
 		createAnswer(params: any): void;
-		handleRemoteJsep(params: { jsep: JSEP }): void;
+		handleRemoteJsep(params: {
+			jsep: JSEP,
+			success?: () => void,
+			error?: (error: any) => void
+		}): void;
 		dtmf(params: any): void;
 		data(params: any): void;
 		isAudioMuted(): boolean;
@@ -199,7 +203,7 @@ declare namespace JanusJS {
 		getSessionId(): string;
 		attach(options: PluginOptions): void;
 		reconnect(options: ReconnectOptions): void;
-		destroy(options: DestroyOptions): void;
+		destroy(options?: DestroyOptions): void;
 	}
 }
 
