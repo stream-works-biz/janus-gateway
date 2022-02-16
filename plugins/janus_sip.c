@@ -3885,6 +3885,7 @@ static void *janus_sip_handler(void *data) {
 			if(session->stack->s_nh_i == NULL) {
 				JANUS_LOG(LOG_WARN, "NUA Handle for 200 OK still null??\n");
 			}
+
 			nua_respond(session->stack->s_nh_i,
 				200, sip_status_phrase(200),
 				SOATAG_USER_SDP_STR(sdp),
@@ -5023,7 +5024,8 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			}
 			break;
 		}
-		case nua_i_invite: {
+		case nua_i_invite:
+		case nua_i_update: {	/* ibrid added following nua_i_update */
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
 			/* Add a reference for this call */
 			janus_sip_ref_active_call(session);
@@ -5175,7 +5177,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			}
 			if(reinvite && session->media.autoaccept_reinvites) {
 				/* No need to involve the application: we reply ourselves */
-				nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
+
+				/* ibrid duplicate 200 response. sent automatically by stack */
+				if (status != 200){
+					nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
+				}
 				janus_sdp_destroy(sdp);
 				break;
 			}
@@ -5424,8 +5430,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				return;
 			}
 			if(!sip->sip_payload || !sip->sip_payload->pl_data) {
-				/* Send a 200 back and ignore the message */
-				nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
+				/* ibrid duplicate 200 response. sent automatically by stack */
+				if (status != 200){
+				    /* Send a 200 back and ignore the message */
+					nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
+				}
 				return;
 			}
 			/* Notify the application */
