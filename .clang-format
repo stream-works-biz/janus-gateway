@@ -1,0 +1,17 @@
+BasedOnStyle: Google 
+AlignAfterOpenBracket: AlwaysBreak
+AlignOperands: true
+BreakBeforeBraces: Linux
+SpaceBeforeParens: Never
+AllowAllParametersOfDeclarationOnNextLine: false
+BinPackParameters: false
+BinPackArguments: false
+AlignTrailingComments: true
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+PenaltyReturnTypeOnItsOwnLine: 1000000
+UseTab: Always
+IndentWidth: 4
+AlignOperands: true
+ColumnLimit: 200
+TabWidth: 4
