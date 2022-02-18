@@ -4258,6 +4258,10 @@ static void *janus_sip_handler(void *data) {
 #pragma GCC diagnostic warning "-Winline"
 			/* Send the REFER */
 			nua_refer(session->stack->s_nh_i,
+				// ibrid
+				// case of no set referredBy value is id@local-ip.
+				// Ipx need to id@domain
+				SIPTAG_REFERRED_BY_STR(session->account.identity),	
 				SIPTAG_REFER_TO(refer_to),
 				TAG_END());
 
