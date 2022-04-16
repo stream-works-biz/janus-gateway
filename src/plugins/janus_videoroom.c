@@ -1789,6 +1789,7 @@ static janus_mutex config_mutex = JANUS_MUTEX_INITIALIZER;
 static volatile gint initialized = 0, stopping = 0;
 static gboolean notify_events = TRUE;
 static gboolean string_ids = FALSE;
+static gboolean ipv6_disabled = FALSE;
 static janus_callbacks *gateway = NULL;
 static GThread *handler_thread;
 static void *janus_videoroom_handler(void *data);
@@ -2451,7 +2452,11 @@ static janus_videoroom_rtp_forwarder *janus_videoroom_rtp_forwarder_add_helper(j
 		gboolean simulcast, int srtp_suite, const char *srtp_crypto,
 		int substream, gboolean is_video, gboolean is_data) {
 	if(!p || !ps || !host) {
-		return 0;
+		return NULL;
+	}
+	if(ipv6_disabled && strstr(host, ":") != NULL) {
+		JANUS_LOG(LOG_ERR, "Attempt to create an IPv6 forwarder, but IPv6 networking is not available\n");
+		return NULL;
 	}
 	janus_refcount_increase(&p->ref);
 	janus_refcount_increase(&ps->ref);
@@ -2460,33 +2465,46 @@ static janus_videoroom_rtp_forwarder *janus_videoroom_rtp_forwarder_add_helper(j
 	int fd = -1;
 	uint16_t local_rtcp_port = 0;
 	if(!is_data && rtcp_port > 0) {
-		fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+		fd = socket(!ipv6_disabled ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 		if(fd < 0) {
 			janus_mutex_unlock(&ps->rtp_forwarders_mutex);
 			janus_refcount_decrease(&ps->ref);
 			janus_refcount_decrease(&p->ref);
 			JANUS_LOG(LOG_ERR, "Error creating RTCP socket for new RTP forwarder... %d (%s)\n",
-				errno, strerror(errno));
-			return NULL;
-		}
-		int v6only = 0;
-		if(setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0) {
-			janus_mutex_unlock(&ps->rtp_forwarders_mutex);
-			janus_refcount_decrease(&ps->ref);
-			janus_refcount_decrease(&p->ref);
-			JANUS_LOG(LOG_ERR, "Error configuring RTCP socket for new RTP forwarder... %d (%s)\n",
 				errno, g_strerror(errno));
-			close(fd);
 			return NULL;
 		}
-		struct sockaddr_in6 address = { 0 };
-		socklen_t len = sizeof(address);
-		memset(&address, 0, sizeof(address));
-		address.sin6_family = AF_INET6;
-		address.sin6_port = htons(0);	/* The RTCP port we received is the remote one */
-		address.sin6_addr = in6addr_any;
-		if(bind(fd, (struct sockaddr *)&address, len) < 0 ||
-				getsockname(fd, (struct sockaddr *)&address, &len) < 0) {
+		struct sockaddr *address = NULL;
+		struct sockaddr_in addr4 = { 0 };
+		struct sockaddr_in6 addr6 = { 0 };
+		socklen_t len = 0;
+		if(!ipv6_disabled) {
+			/* Configure the socket so that it can be used both on IPv4 and IPv6 */
+			int v6only = 0;
+			if(setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0) {
+				janus_mutex_unlock(&ps->rtp_forwarders_mutex);
+				janus_refcount_decrease(&ps->ref);
+				janus_refcount_decrease(&p->ref);
+				JANUS_LOG(LOG_ERR, "Error configuring RTCP socket for new RTP forwarder... %d (%s)\n",
+					errno, g_strerror(errno));
+				close(fd);
+				return NULL;
+			}
+			len = sizeof(addr6);
+			addr6.sin6_family = AF_INET6;
+			addr6.sin6_port = htons(0);		/* The RTCP port we received is the remote one */
+			addr6.sin6_addr = in6addr_any;
+			address = (struct sockaddr *)&addr6;
+		} else {
+			/* IPv6 is disabled, only do IPv4 */
+			len = sizeof(addr4);
+			addr4.sin_family = AF_INET;
+			addr4.sin_port = htons(0);		/* The RTCP port we received is the remote one */
+			addr4.sin_addr.s_addr = INADDR_ANY;
+			address = (struct sockaddr *)&addr4;
+		}
+		if(bind(fd, (struct sockaddr *)address, len) < 0 ||
+				getsockname(fd, (struct sockaddr *)address, &len) < 0) {
 			janus_mutex_unlock(&ps->rtp_forwarders_mutex);
 			janus_refcount_decrease(&ps->ref);
 			janus_refcount_decrease(&p->ref);
@@ -2495,7 +2513,7 @@ static janus_videoroom_rtp_forwarder *janus_videoroom_rtp_forwarder_add_helper(j
 			close(fd);
 			return NULL;
 		}
-		local_rtcp_port = ntohs(address.sin6_port);
+		local_rtcp_port = ntohs(!ipv6_disabled ? addr6.sin6_port : addr4.sin_port);
 		JANUS_LOG(LOG_VERB, "Bound local %s RTCP port: %"SCNu16"\n",
 			is_video ? "video" : "audio", local_rtcp_port);
 	}
@@ -3437,6 +3455,22 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 		g_error_free(error);
 	}
 
+	/* Finally, let's check if IPv6 is disabled, as we may need to know for forwarders */
+	int fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+	if(fd <= 0) {
+		ipv6_disabled = TRUE;
+	} else {
+		int v6only = 0;
+		if(setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0)
+			ipv6_disabled = TRUE;
+	}
+	if(fd > 0)
+		close(fd);
+	ipv6_disabled = TRUE;
+	if(ipv6_disabled) {
+		JANUS_LOG(LOG_WARN, "IPv6 disabled, will only create VideoRoom forwarders to IPv4 addresses\n");
+	}
+
 	g_atomic_int_set(&initialized, 1);
 
 	/* Launch the thread that will handle incoming messages */
@@ -3932,7 +3966,9 @@ json_t *janus_videoroom_query_session(janus_plugin_session *handle) {
 				json_object_set_new(info, "paused", participant->paused ? json_true() : json_false());
 				if(participant->e2ee)
 					json_object_set_new(info, "e2ee", json_true());
+				janus_mutex_lock(&participant->streams_mutex);
 				json_t *media = janus_videoroom_subscriber_streams_summary(participant, FALSE, NULL);
+				janus_mutex_unlock(&participant->streams_mutex);
 				json_object_set_new(info, "streams", media);
 			}
 			if(participant)
@@ -5094,15 +5130,16 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 		janus_refcount_increase(&publisher->ref);	/* This is just to handle the request for now */
 		janus_mutex_lock(&publisher->rtp_forwarders_mutex);
 		if(publisher->udp_sock <= 0) {
-			publisher->udp_sock = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+			publisher->udp_sock = socket(!ipv6_disabled ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 			int v6only = 0;
 			if(publisher->udp_sock <= 0 ||
-					setsockopt(publisher->udp_sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0) {
+					(!ipv6_disabled && setsockopt(publisher->udp_sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0)) {
 				janus_mutex_unlock(&publisher->rtp_forwarders_mutex);
 				janus_refcount_decrease(&publisher->ref);
 				janus_mutex_unlock(&videoroom->mutex);
 				janus_refcount_decrease(&videoroom->ref);
-				JANUS_LOG(LOG_ERR, "Could not open UDP socket for RTP stream for publisher (%s)\n", publisher_id_str);
+				JANUS_LOG(LOG_ERR, "Could not open UDP socket for RTP stream for publisher (%s), %d (%s)\n",
+					publisher_id_str, errno, g_strerror(errno));
 				error_code = JANUS_VIDEOROOM_ERROR_UNKNOWN_ERROR;
 				g_snprintf(error_cause, 512, "Could not open UDP socket for RTP stream");
 				goto prepare_response;
@@ -7190,6 +7227,9 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 					json_object_set_new(event, "room", string_ids ?
 						json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 					json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
+					json_t *media_event = NULL;
+					if(notify_events && gateway->events_is_enabled())
+						media_event = json_deep_copy(media);
 					json_object_set_new(event, "streams", media);
 					/* Generate a new offer */
 					json_t *jsep = janus_videoroom_subscriber_offer(subscriber);
@@ -7206,8 +7246,7 @@ static void janus_videoroom_hangup_media_internal(gpointer session_data) {
 						json_object_set_new(info, "event", json_string("updated"));
 						json_object_set_new(info, "room", string_ids ?
 							json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
-						json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
-						json_object_set_new(info, "streams", media);
+						json_object_set_new(info, "streams", media_event);
 						json_object_set_new(info, "private_id", json_integer(subscriber->pvt_id));
 						gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 					}
@@ -8227,12 +8266,15 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(event, "id", string_ids ? json_string(feed_id_str) : json_integer(feed_id));
 					json_object_set_new(event, "warning", json_string("deprecated_api"));
 				}
+				janus_mutex_lock(&subscriber->streams_mutex);
 				json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, legacy, event);
+				json_t *media_event = NULL;
+				if(notify_events && gateway->events_is_enabled())
+					media_event = json_deep_copy(media);
 				json_object_set_new(event, "streams", media);
 				session->participant_type = janus_videoroom_p_type_subscriber;
 				JANUS_LOG(LOG_VERB, "Preparing JSON event as a reply\n");
 				/* Negotiate by crafting a new SDP matching the subscriptions */
-				janus_mutex_lock(&subscriber->streams_mutex);
 				json_t *jsep = janus_videoroom_subscriber_offer(subscriber);
 				janus_mutex_unlock(&subscriber->streams_mutex);
 				/* How long will the Janus core take to push the event? */
@@ -8248,8 +8290,7 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(info, "event", json_string("subscribing"));
 					json_object_set_new(info, "room", string_ids ?
 						json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
-					json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
-					json_object_set_new(info, "streams", media);
+					json_object_set_new(info, "streams", media_event);
 					json_object_set_new(info, "private_id", json_integer(pvt_id));
 					gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 				}
@@ -8281,9 +8322,15 @@ static void *janus_videoroom_handler(void *data) {
 			}
 			if(participant->room == NULL) {
 				janus_refcount_decrease(&participant->ref);
-				JANUS_LOG(LOG_ERR, "No such room\n");
-				error_code = JANUS_VIDEOROOM_ERROR_NO_SUCH_ROOM;
-				g_snprintf(error_cause, 512, "No such room");
+				if(!strcasecmp(request_text, "join") || !strcasecmp(request_text, "joinandconfigure")) {
+					JANUS_LOG(LOG_ERR, "Not in a room (create a new handle)\n");
+					error_code = JANUS_VIDEOROOM_ERROR_ALREADY_JOINED;
+					g_snprintf(error_cause, 512, "Not in a room (create a new handle)");
+				} else {
+					JANUS_LOG(LOG_ERR, "No such room\n");
+					error_code = JANUS_VIDEOROOM_ERROR_NO_SUCH_ROOM;
+					g_snprintf(error_cause, 512, "No such room");
+				}
 				goto error;
 			}
 			if(!strcasecmp(request_text, "join") || !strcasecmp(request_text, "joinandconfigure")) {
@@ -9005,6 +9052,9 @@ static void *janus_videoroom_handler(void *data) {
 				json_object_set_new(event, "room", string_ids ?
 					json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 				json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
+				json_t *media_event = NULL;
+				if(notify_events && gateway->events_is_enabled())
+					media_event = json_deep_copy(media);
 				json_object_set_new(event, "streams", media);
 				/* Generate a new offer */
 				json_t *jsep = janus_videoroom_subscriber_offer(subscriber);
@@ -9021,8 +9071,7 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(info, "event", json_string("updated"));
 					json_object_set_new(info, "room", string_ids ?
 						json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
-					json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
-					json_object_set_new(info, "streams", media);
+					json_object_set_new(info, "streams", media_event);
 					json_object_set_new(info, "private_id", json_integer(subscriber->pvt_id));
 					gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 				}
@@ -9765,7 +9814,12 @@ static void *janus_videoroom_handler(void *data) {
 				json_object_set_new(event, "room", string_ids ?
 					json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 				json_object_set_new(event, "changes", json_integer(changes));
+				janus_mutex_lock(&subscriber->streams_mutex);
 				json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
+				json_t *media_event = NULL;
+				if(notify_events && gateway->events_is_enabled())
+					media_event = json_deep_copy(media);
+				janus_mutex_unlock(&subscriber->streams_mutex);
 				json_object_set_new(event, "streams", media);
 				/* Also notify event handlers */
 				if(notify_events && gateway->events_is_enabled()) {
@@ -9774,8 +9828,7 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(info, "room", string_ids ?
 						json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 					json_object_set_new(event, "changes", json_integer(changes));
-					media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
-					json_object_set_new(event, "streams", media);
+					json_object_set_new(event, "streams", media_event);
 					gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 				}
 				/* Check if we need a renegotiation as well */
@@ -9793,6 +9846,9 @@ static void *janus_videoroom_handler(void *data) {
 						json_object_set_new(revent, "room", string_ids ?
 							json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 						json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
+						json_t *media_event = NULL;
+						if(notify_events && gateway->events_is_enabled())
+							media_event = json_deep_copy(media);
 						json_object_set_new(revent, "streams", media);
 						/* Generate a new offer */
 						json_t *jsep = janus_videoroom_subscriber_offer(subscriber);
@@ -9810,8 +9866,7 @@ static void *janus_videoroom_handler(void *data) {
 							json_object_set_new(info, "room", string_ids ?
 								json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 							json_object_set_new(info, "room", json_integer(subscriber->room_id));
-							json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
-							json_object_set_new(info, "streams", media);
+							json_object_set_new(info, "streams", media_event);
 							json_object_set_new(info, "private_id", json_integer(subscriber->pvt_id));
 							gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 						}
@@ -9902,6 +9957,9 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(event, "room", string_ids ?
 						json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
 					json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
+					json_t *media_event = NULL;
+					if(notify_events && gateway->events_is_enabled())
+						media_event = json_deep_copy(media);
 					json_object_set_new(event, "streams", media);
 					/* Generate a new offer */
 					json_t *jsep = janus_videoroom_subscriber_offer(subscriber);
@@ -9921,8 +9979,7 @@ static void *janus_videoroom_handler(void *data) {
 						json_object_set_new(info, "event", json_string("updated"));
 						json_object_set_new(info, "room", string_ids ?
 							json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
-						json_t *media = janus_videoroom_subscriber_streams_summary(subscriber, FALSE, NULL);
-						json_object_set_new(info, "streams", media);
+						json_object_set_new(info, "streams", media_event);
 						json_object_set_new(info, "private_id", json_integer(subscriber->pvt_id));
 						gateway->notify_event(&janus_videoroom_plugin, session->handle, info);
 					}

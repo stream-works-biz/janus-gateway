@@ -967,6 +967,8 @@ function Janus(gatewayCallbacks) {
 				}
 				if(errorThrown === "")
 					callbacks.error(textStatus + ": Is the server down?");
+				else if (errorThrown && errorThrown.error)
+					callbacks.error(textStatus + ": " + errorThrown.error.message);
 				else
 					callbacks.error(textStatus + ": " + errorThrown);
 			}
@@ -2053,10 +2055,9 @@ function Janus(gatewayCallbacks) {
 			for(let i in tracks) {
 				var track = tracks[i];
 				track.onended = function(ev) {
-					// FIXME What does this event contain? Is there a reference to the track?
 					Janus.log("Local track removed:", ev);
 					try {
-						pluginHandle.onlocaltrack(ev.track, false);
+						pluginHandle.onlocaltrack(ev.target, false);
 					} catch(e) {
 						Janus.error(e);
 					}
