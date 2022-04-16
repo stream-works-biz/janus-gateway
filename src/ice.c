@@ -290,6 +290,11 @@ static gboolean janus_ice_debugging_enabled;
 gboolean janus_ice_is_ice_debugging_enabled(void) {
 	return janus_ice_debugging_enabled;
 }
+
+static void nice_janus_handler(const gchar *log_domain, GLogLevelFlags log_level,const gchar *message,gpointer user_data){
+		JANUS_LOG(LOG_DBG, "%s\n",message);
+}
+
 void janus_ice_debugging_enable(void) {
 	JANUS_LOG(LOG_VERB, "Enabling libnice debugging...\n");
 	if(g_getenv("NICE_DEBUG") == NULL) {
@@ -304,6 +309,8 @@ void janus_ice_debugging_enable(void) {
 		g_getenv("NICE_DEBUG"), g_getenv("G_MESSAGES_DEBUG"));
 	janus_ice_debugging_enabled = TRUE;
 	nice_debug_enable(strstr(g_getenv("NICE_DEBUG"), "all") || strstr(g_getenv("NICE_DEBUG"), "stun"));
+
+    nice_debug_set_handler((GLogFunc)nice_janus_handler);
 }
 void janus_ice_debugging_disable(void) {
 	JANUS_LOG(LOG_VERB, "Disabling libnice debugging...\n");

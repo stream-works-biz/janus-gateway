@@ -23,6 +23,7 @@
 
 #include <glib.h>
 #include <agent.h>
+#include <stun/debug.h>
 
 #include "sdp.h"
 #include "dtls.h"

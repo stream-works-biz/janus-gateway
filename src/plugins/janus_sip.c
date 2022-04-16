@@ -1644,7 +1644,7 @@ static void janus_sip_parse_custom_contact_params(json_t *root, char *custom_par
 /* Sofia SIP logger function: when the Event Handlers mechanism is enabled,
  * we use this to intercept SIP messages sent by the stack (received
  * messages are more easily recoverable in janus_sip_sofia_callback) */
-char sofia_log[2048];
+char sofia_log[8192];
 char call_id[255];
 gboolean skip = FALSE, started = FALSE, append = FALSE;
 static void janus_sip_sofia_logger(void *stream, char const *fmt, va_list ap) {
@@ -2405,7 +2405,7 @@ void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *pack
 				janus_recorder_save_frame(session->vrc, buf, len);
 				/* Is SRTP involved? */
 				if(session->media.has_srtp_local_video) {
-					char sbuf[2048];
+					char sbuf[8192];
 					memcpy(&sbuf, buf, len);
 					int protected = len;
 					int res = srtp_protect(session->media.video_srtp_out, &sbuf, &protected);
@@ -2451,7 +2451,7 @@ void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *pack
 				janus_recorder_save_frame(session->arc, buf, len);
 				/* Is SRTP involved? */
 				if(session->media.has_srtp_local_audio) {
-					char sbuf[2048];
+					char sbuf[8192];
 					memcpy(&sbuf, buf, len);
 					int protected = len;
 					int res = srtp_protect(session->media.audio_srtp_out, &sbuf, &protected);
@@ -2509,7 +2509,7 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *pa
 				janus_rtcp_fix_ssrc(NULL, (char *)buf, len, 1, session->media.video_ssrc, session->media.video_ssrc_peer);
 				/* Is SRTP involved? */
 				if(session->media.has_srtp_local_video) {
-					char sbuf[2048];
+					char sbuf[8192];
 					memcpy(&sbuf, buf, len);
 					int protected = len;
 					int res = srtp_protect_rtcp(session->media.video_srtp_out, &sbuf, &protected);
@@ -2539,7 +2539,7 @@ void janus_sip_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *pa
 				janus_rtcp_fix_ssrc(NULL, (char *)buf, len, 1, session->media.audio_ssrc, session->media.audio_ssrc_peer);
 				/* Is SRTP involved? */
 				if(session->media.has_srtp_local_audio) {
-					char sbuf[2048];
+					char sbuf[8192];
 					memcpy(&sbuf, buf, len);
 					int protected = len;
 					int res = srtp_protect_rtcp(session->media.audio_srtp_out, &sbuf, &protected);
@@ -3142,10 +3142,10 @@ static void *janus_sip_handler(void *data) {
 
 			if(send_register) {
 				/* Check if the REGISTER needs to be enriched with custom headers */
-				char custom_headers[2048];
+				char custom_headers[8192];
 				janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 				/* Do the same in case there are custom Contact URI params */
-				char custom_params[2048];
+				char custom_params[8192];
 				janus_sip_parse_custom_contact_params(root, (char *)&custom_params, sizeof(custom_params));
 				/* Create a new NUA handle */
 				janus_mutex_lock(&session->stack->smutex);
@@ -3407,7 +3407,7 @@ static void *janus_sip_handler(void *data) {
 			}
 			json_t *uri = json_object_get(root, "uri");
 			/* Check if the INVITE needs to be enriched with custom headers */
-			char custom_headers[2048];
+			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 			/* SDES-SRTP is disabled by default, let's see if we need to enable it */
 			gboolean offer_srtp = FALSE, require_srtp = FALSE;
@@ -3537,6 +3537,11 @@ static void *janus_sip_handler(void *data) {
 				g_snprintf(error_cause, 512, "Error manipulating SDP");
 				goto error;
 			}
+
+
+
+			JANUS_LOG(LOG_INFO, "janus_sip_sdp_manipulate\n");
+
 			/* Take note of the SDP (may be useful for UPDATEs or re-INVITEs) */
 			janus_sdp_destroy(session->sdp);
 			session->sdp = parsed_sdp;
@@ -3881,7 +3886,7 @@ static void *janus_sip_handler(void *data) {
 				gateway->notify_event(&janus_sip_plugin, session->handle, info);
 			}
 			/* Check if the OK needs to be enriched with custom headers */
-			char custom_headers[2048];
+			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 			/* Send 200 OK */
 			if(!answer) {
@@ -4175,7 +4180,7 @@ static void *janus_sip_handler(void *data) {
 				response_code = 486;
 			}
 			/* Check if the response needs to be enriched with custom headers */
-			char custom_headers[2048];
+			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 			nua_respond(session->stack->s_nh_i, response_code, sip_status_phrase(response_code),
 				    TAG_IF(strlen(custom_headers) > 0, SIPTAG_HEADER_STR(custom_headers)),
@@ -4369,7 +4374,7 @@ static void *janus_sip_handler(void *data) {
 					}
 				}
 				/* Check if the INVITE needs to be enriched with custom headers */
-				char custom_headers[2048];
+				char custom_headers[8192];
 				janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 
 				/* Send the re-INVITE */
@@ -4407,7 +4412,7 @@ static void *janus_sip_handler(void *data) {
 			session->media.ready = FALSE;
 			session->media.on_hold = FALSE;
 			janus_sip_call_update_status(session, janus_sip_call_status_closing);
-			char custom_headers[2048];
+			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 			nua_bye(session->stack->s_nh_i,
 				TAG_IF(strlen(custom_headers) > 0, SIPTAG_HEADER_STR(custom_headers)),
@@ -4643,7 +4648,7 @@ static void *janus_sip_handler(void *data) {
 				goto error;
 			const char *info_type = json_string_value(json_object_get(root, "type"));
 			const char *info_content = json_string_value(json_object_get(root, "content"));
-			char custom_headers[2048];
+			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 			nua_info(session->stack->s_nh_i,
 				SIPTAG_CONTENT_TYPE_STR(info_type),
@@ -4705,7 +4710,7 @@ static void *janus_sip_handler(void *data) {
 				content_type = json_string_value(content_type_text);
 
 			const char *msg_content = json_string_value(json_object_get(root, "content"));
-			char custom_headers[2048];
+			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 
 			char *message_callid = NULL;
@@ -4821,7 +4826,7 @@ static void *janus_sip_handler(void *data) {
 			}
 			char payload[64];
 			g_snprintf(payload, sizeof(payload), "Signal=%s\r\nDuration=%d", digit_text, duration_ms);
-			char custom_headers[2048];
+			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
 			nua_info(session->stack->s_nh_i,
 				SIPTAG_CONTENT_TYPE_STR("application/dtmf-relay"),
