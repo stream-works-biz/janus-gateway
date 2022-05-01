@@ -3388,7 +3388,7 @@ int janus_videoroom_init(janus_callbacks *callback, const char *config_path) {
 				videoroom->lock_record = janus_is_true(lock_record->value);
 			}
 			/* By default, the VideoRoom plugin does not notify about participants simply joining the room.
-			   It only notifies when the participant actually starts publishing media. */
+				It only notifies when the participant actually starts publishing media. */
 			videoroom->notify_joining = FALSE;
 			if(notify_joining != NULL && notify_joining->value != NULL)
 				videoroom->notify_joining = janus_is_true(notify_joining->value);
@@ -6083,6 +6083,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 			}
 		}
 		ps->muted = muted;
+		janus_mutex_unlock(&participant->streams_mutex);
 		/* Prepare an event for this */
 		json_t *event = json_object();
 		json_object_set_new(event, "videoroom", json_string("event"));
@@ -6325,7 +6326,7 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 					janus_mutex_unlock(&participant->rec_mutex);
 				}
 			}
-        }
+		}
 		janus_mutex_unlock(&videoroom->mutex);
 		janus_refcount_decrease(&videoroom->ref);
 		response = json_object();
@@ -7106,6 +7107,9 @@ static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps
 					janus_videoroom_media_str(ps->type));
 			}
 		}
+		/* If the stream has a description, store it in the recording */
+		if(ps->description)
+			janus_recorder_description(rc, ps->description);
 		/* If the video-orientation extension has been negotiated, mark it in the recording */
 		if(ps->video_orient_extmap_id > 0)
 			janus_recorder_add_extmap(rc, ps->video_orient_extmap_id, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION);
@@ -7785,11 +7789,11 @@ static void *janus_videoroom_handler(void *data) {
 					json_integer(publisher->room->room_id));
 					json_object_set_new(info, "id", string_ids ? json_string(user_id_str) : json_integer(user_id));
 					json_object_set_new(info, "private_id", json_integer(publisher->pvt_id));
-                    if(publisher->room->check_allowed) {
-                        const char *token = json_string_value(json_object_get(root, "token"));
-                        json_object_set_new(info, "token", json_string(token));
-                    }
-                    if(display_text != NULL)
+					if(publisher->room->check_allowed) {
+						const char *token = json_string_value(json_object_get(root, "token"));
+						json_object_set_new(info, "token", json_string(token));
+					}
+					if(display_text != NULL)
 						json_object_set_new(info, "display", json_string(display_text));
 					if(publisher->user_audio_active_packets)
 						json_object_set_new(info, "audio_active_packets", json_integer(publisher->user_audio_active_packets));
@@ -9037,6 +9041,13 @@ static void *janus_videoroom_handler(void *data) {
 					g_atomic_int_set(&subscriber->pending_offer, 1);
 					janus_mutex_unlock(&subscriber->streams_mutex);
 					JANUS_LOG(LOG_VERB, "Post-poning new offer, waiting for previous answer\n");
+					/* Send a temporary event */
+					event = json_object();
+					json_object_set_new(event, "videoroom", json_string("updating"));
+					json_object_set_new(event, "room", string_ids ?
+						json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
+					gateway->push_event(msg->handle, &janus_videoroom_plugin, msg->transaction, event, NULL);
+					json_decref(event);
 					/* Decrease the references we took before */
 					while(publishers) {
 						janus_videoroom_publisher *publisher = (janus_videoroom_publisher *)publishers->data;
@@ -9219,6 +9230,14 @@ static void *janus_videoroom_handler(void *data) {
 					g_atomic_int_set(&subscriber->pending_offer, 1);
 					janus_mutex_unlock(&subscriber->streams_mutex);
 					JANUS_LOG(LOG_VERB, "Post-poning new offer, waiting for previous answer\n");
+					/* Send a temporary event */
+					event = json_object();
+					json_object_set_new(event, "videoroom", json_string("updating"));
+					json_object_set_new(event, "room", string_ids ?
+						json_string(subscriber->room_id_str) : json_integer(subscriber->room_id));
+					gateway->push_event(msg->handle, &janus_videoroom_plugin, msg->transaction, event, NULL);
+					json_decref(event);
+					/* Decrease the references */
 					janus_refcount_decrease(&subscriber->ref);
 					janus_videoroom_message_free(msg);
 					continue;
