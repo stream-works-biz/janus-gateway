@@ -4033,6 +4033,7 @@ static int janus_videoroom_access_room(json_t *root, gboolean check_modify, gboo
 				return error_code;
 			}
 		}
+		
 		JANUS_CHECK_SECRET((*videoroom)->room_pin, root, "pin", error_code, error_cause2,
 			JANUS_VIDEOROOM_ERROR_MISSING_ELEMENT, JANUS_VIDEOROOM_ERROR_INVALID_ELEMENT, JANUS_VIDEOROOM_ERROR_UNAUTHORIZED);
 		if(error_code != 0) {

@@ -292,7 +292,7 @@ gboolean janus_ice_is_ice_debugging_enabled(void) {
 }
 
 static void nice_janus_handler(const gchar *log_domain, GLogLevelFlags log_level,const gchar *message,gpointer user_data){
-		JANUS_LOG(LOG_DBG, "%s\n",message);
+	JANUS_LOG(LOG_INFO, "libnice %s\n",message);
 }
 
 void janus_ice_debugging_enable(void) {
