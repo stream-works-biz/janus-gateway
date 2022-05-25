@@ -210,6 +210,7 @@ Janus.endOfCandidates = null;
 
 // Stop all tracks from a given stream
 Janus.stopAllTracks = function(stream) {
+	Janus.log("stopAllTracks");
 	try {
 		// Try a MediaStreamTrack.stop() for each track
 		var tracks = stream.getTracks();
@@ -217,6 +218,8 @@ Janus.stopAllTracks = function(stream) {
 			Janus.log(mst);
 			if(mst) {
 				mst.stop();
+				// ibrid
+				stream.removeTrack(track);
 			}
 		}
 	} catch(e) {
@@ -408,7 +411,11 @@ Janus.init = function(options) {
 			try {
 				tempPc.addTransceiver('audio');
 				Janus.unifiedPlan = true;
-			} catch (e) {}
+			} catch (e) {
+				// ibrid
+				Janus.warn("This version no support unifiedPlan");
+			}
+}
 			tempPc.close();
 		}
 		Janus.initDone = true;
@@ -1849,6 +1856,8 @@ function Janus(gatewayCallbacks) {
 					if(config.trickle === true) {
 						// Notify end of candidates
 						sendTrickleCandidate(handleId, {"completed": true});
+						//ibrid
+						pluginHandle.iceState('completed');
 					} else {
 						// No trickle, time to send the complete SDP (including all candidates)
 						sendSDP(handleId, callbacks);
@@ -1932,7 +1941,8 @@ function Janus(gatewayCallbacks) {
 				event.track.onmute = function(ev) {
 					Janus.log("Remote track muted:", ev);
 					if(config.remoteStream && trackMutedTimeoutId == null) {
-						trackMutedTimeoutId = setTimeout(function() {
+						// ibrid immediately notify event
+						// trackMutedTimeoutId = setTimeout(function() {
 							Janus.log("Removing remote track");
 							if (config.remoteStream) {
 								config.remoteStream.removeTrack(ev.target);
@@ -1952,7 +1962,7 @@ function Janus(gatewayCallbacks) {
 							trackMutedTimeoutId = null;
 						// Chrome seems to raise mute events only at multiples of 834ms;
 						// we set the timeout to three times this value (rounded to 840ms)
-						}, 3 * 840);
+						//}, 3 * 840);
 					}
 				};
 				event.track.onunmute = function(ev) {
