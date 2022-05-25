@@ -1148,12 +1148,14 @@ int janus_process_incoming_request(janus_request *request) {
 	}
 
 	/* If we got here, make sure we have a session (and/or a handle) */
+	JANUS_LOG(LOG_INFO, "janus_session_find <--  %"SCNu64"...\n", session_id);
 	session = janus_session_find(session_id);
 	if(!session) {
 		JANUS_LOG(LOG_ERR, "Couldn't find any session %"SCNu64"...\n", session_id);
 		ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_SESSION_NOT_FOUND, "No such session %"SCNu64"", session_id);
 		goto jsondone;
 	}
+	JANUS_LOG(LOG_INFO, "janus_session_find -->  %"SCNu64"...\n", session_id);
 	/* Update the last activity timer */
 	session->last_activity = janus_get_monotonic_time();
 	handle = NULL;
@@ -1331,6 +1333,7 @@ int janus_process_incoming_request(janus_request *request) {
 		/* Send the success reply */
 		ret = janus_process_success(request, reply);
 	} else if(!strcasecmp(message_text, "message")) {
+
 		if(handle == NULL) {
 			/* Query is an handle-level command */
 			ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_INVALID_REQUEST_PATH, "Unhandled request '%s' at this path", message_text);
@@ -1341,7 +1344,7 @@ int janus_process_incoming_request(janus_request *request) {
 			goto jsondone;
 		}
 		janus_plugin *plugin_t = (janus_plugin *)handle->app;
-		JANUS_LOG(LOG_VERB, "[%"SCNu64"] There's a message for %s\n", handle->handle_id, plugin_t->get_name());
+		JANUS_LOG(LOG_INFO, "[%"SCNu64"] There's a message for %s\n", handle->handle_id, plugin_t->get_name());
 		JANUS_VALIDATE_JSON_OBJECT(root, body_parameters,
 			error_code, error_cause, FALSE,
 			JANUS_ERROR_MISSING_MANDATORY_ELEMENT, JANUS_ERROR_INVALID_ELEMENT_TYPE);
@@ -1392,7 +1395,7 @@ int janus_process_incoming_request(janus_request *request) {
 			gboolean e2ee = jsep_e2ee ? json_is_true(jsep_e2ee) : FALSE;
 			/* Are we still cleaning up from a previous media session? */
 			if(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_CLEANING)) {
-				JANUS_LOG(LOG_VERB, "[%"SCNu64"] Still cleaning up from a previous media session, let's wait a bit...\n", handle->handle_id);
+				JANUS_LOG(LOG_INFO, "[%"SCNu64"] Still cleaning up from a previous media session, let's wait a bit...\n", handle->handle_id);
 				gint64 waited = 0;
 				while(janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_CLEANING)) {
 					g_usleep(100000);

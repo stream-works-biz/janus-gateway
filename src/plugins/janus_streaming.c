@@ -2001,6 +2001,7 @@ int janus_streaming_init(janus_callbacks *callback, const char *config_path) {
 				}
 				/* How are we adding media? */
 				if(media != NULL) {
+
 					/* We're using the new media-based configuration, iterate on all media objects */
 					gboolean failed = FALSE;
 					GList *ml = media->list;
@@ -2127,6 +2128,7 @@ int janus_streaming_init(janus_callbacks *callback, const char *config_path) {
 						continue;
 					}
 				} else {
+
 					/* If we got here, we create a mountpoint the "old" way */
 					janus_network_address video_iface, audio_iface, data_iface;
 					janus_config_item *audio = janus_config_get(config, cat, janus_config_type_item, "audio");
