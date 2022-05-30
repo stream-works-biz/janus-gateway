@@ -3106,8 +3106,9 @@ static void janus_ice_cb_nice_recv(NiceAgent *agent, guint stream_id, guint comp
 					g_slist_free(nacks);
 					nacks = NULL;
 				}
-				if(medium->retransmit_recent_cnt &&
-						now - medium->retransmit_log_ts > 5*G_USEC_PER_SEC) {
+				if(medium->retransmit_recent_cnt
+                    // ibrid
+					/*	&& now - medium->retransmit_log_ts > 5*G_USEC_PER_SEC*/) {
 					JANUS_LOG(LOG_VERB, "[%"SCNu64"] Retransmitted %u packets due to NACK (%s stream #%d)\n",
 						handle->handle_id, medium->retransmit_recent_cnt, video ? "video" : "audio", vindex);
 					medium->retransmit_recent_cnt = 0;

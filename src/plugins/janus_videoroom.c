@@ -8401,7 +8401,12 @@ static void *janus_videoroom_handler(void *data) {
 				/* Better to specify the 'send' property of a specific 'mid' */
 				const char *mid = json_string_value(json_object_get(root, "mid"));
 				json_t *send = json_object_get(root, "send");
-				/* A renegotiation may be taking place */
+
+
+//ibrid
+				JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \n",mid, (keyframe && json_is_true(keyframe)) ? "true":"false");
+	
+    			/* A renegotiation may be taking place */
 				gboolean do_update = update ? json_is_true(update) : FALSE;
 				if(do_update && !sdp_update) {
 					JANUS_LOG(LOG_WARN, "Got an 'update' request, but no SDP update? Ignoring...\n");
@@ -8499,6 +8504,14 @@ static void *janus_videoroom_handler(void *data) {
 						}
 						if(ps->type == JANUS_VIDEOROOM_MEDIA_VIDEO && (mid_found || mid == NULL) &&
 								keyframe && json_is_true(keyframe)) {
+
+//ibrid
+							JANUS_LOG(LOG_INFO, "configure KEYFRAME (%s): %s (room %s, user %s)\n",
+								ps->mid, ps->active ? "true" : "false", participant->room_id_str, participant->user_id_str);
+
+
+
+
 							/* Send a PLI */
 							janus_videoroom_reqpli(ps, "Keyframe request");
 						}
