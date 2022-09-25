@@ -3056,8 +3056,7 @@ static json_t *janus_videoroom_subscriber_offer(janus_videoroom_subscriber *subs
 			JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_AUDIO_LEVEL,
 				(stream->type == JANUS_VIDEOROOM_MEDIA_AUDIO && (ps && ps->audio_level_extmap_id > 0)) ? janus_rtp_extension_id(JANUS_RTP_EXTMAP_AUDIO_LEVEL) : 0,
 			JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_MID, janus_rtp_extension_id(JANUS_RTP_EXTMAP_MID),
-			JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION,
-				(stream->type == JANUS_VIDEOROOM_MEDIA_VIDEO && (ps && ps->video_orient_extmap_id > 0)) ? janus_rtp_extension_id(JANUS_RTP_EXTMAP_VIDEO_ORIENTATION) : 0,
+			JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION,(stream->type == JANUS_VIDEOROOM_MEDIA_VIDEO && (ps && ps->video_orient_extmap_id > 0)) ? janus_rtp_extension_id(JANUS_RTP_EXTMAP_VIDEO_ORIENTATION) : 0,
 			JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_PLAYOUT_DELAY,
 				(stream->type == JANUS_VIDEOROOM_MEDIA_VIDEO && (ps && ps->playout_delay_extmap_id > 0)) ? janus_rtp_extension_id(JANUS_RTP_EXTMAP_PLAYOUT_DELAY) : 0,
 			JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC,
@@ -6712,6 +6711,24 @@ void janus_videoroom_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp
 				struct sockaddr *address = (rtp_forward->serv_addr.sin_family == AF_INET ?
 					(struct sockaddr *)&rtp_forward->serv_addr : (struct sockaddr *)&rtp_forward->serv_addr6);
 				size_t addrlen = (rtp_forward->serv_addr.sin_family == AF_INET ? sizeof(rtp_forward->serv_addr) : sizeof(rtp_forward->serv_addr6));
+
+				// streamworks
+				/* check for rtp relay 
+				gboolean c = FALSE, f = FALSE, r1 = FALSE, r0 = FALSE;
+				int rotation = -1;
+				if(janus_rtp_header_extension_parse_video_orientation(buf, len, 13, &c, &f, &r1, &r0) == 0) {
+					rotation = 0;
+					if(r1 && r0)
+						rotation = 270;
+					else if(r1)
+						rotation = 180;
+					else if(r0)
+						rotation = 90;
+
+					JANUS_LOG(LOG_INFO, "janus_videoroom_incoming_rtp  rotation:%d\n",rotation);
+				}
+				*/
+			
 				if(sendto(participant->udp_sock, buf, len, 0, address, addrlen) < 0) {
 					JANUS_LOG(LOG_HUGE, "Error forwarding RTP %s packet for %s... %s (len=%d)...\n",
 						(video ? "video" : "audio"), participant->display, g_strerror(errno), len);
@@ -8403,7 +8420,7 @@ static void *janus_videoroom_handler(void *data) {
 				json_t *send = json_object_get(root, "send");
 
 
-//ibrid
+//streamworks
 				JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \n",mid, (keyframe && json_is_true(keyframe)) ? "true":"false");
 	
     			/* A renegotiation may be taking place */
@@ -8505,12 +8522,9 @@ static void *janus_videoroom_handler(void *data) {
 						if(ps->type == JANUS_VIDEOROOM_MEDIA_VIDEO && (mid_found || mid == NULL) &&
 								keyframe && json_is_true(keyframe)) {
 
-//ibrid
+//streamworks
 							JANUS_LOG(LOG_INFO, "configure KEYFRAME (%s): %s (room %s, user %s)\n",
 								ps->mid, ps->active ? "true" : "false", participant->room_id_str, participant->user_id_str);
-
-
-
 
 							/* Send a PLI */
 							janus_videoroom_reqpli(ps, "Keyframe request");

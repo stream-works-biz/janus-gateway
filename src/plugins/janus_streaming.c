@@ -1201,12 +1201,15 @@ typedef struct janus_streaming_rtp_keyframe {
 typedef struct janus_streaming_rtp_relay_packet {
 	int mindex;
 	janus_rtp_header *data;
+	/// streamworks
+	janus_plugin_rtp_extensions extensions;
 	gint length;
 	gboolean is_rtp;	/* This may be a data packet and not RTP */
 	gboolean is_data;
 	gboolean is_video;
 	gboolean is_keyframe;
 	gboolean simulcast;
+
 	uint32_t ssrc[3];
 	janus_videocodec codec;
 	int substream;
@@ -1280,6 +1283,7 @@ typedef struct janus_streaming_rtp_source {
 	gboolean e2ee;
 	/* Whether the playout-delay extension should be negotiated or not for new subscribers */
 	gboolean playoutdelay_ext;
+
 } janus_streaming_rtp_source;
 
 typedef enum janus_streaming_media {
@@ -1343,6 +1347,9 @@ typedef struct janus_streaming_rtp_source_stream {
 	void *last_msg;
 	janus_mutex buffermsg_mutex;
 	janus_refcount ref;
+
+	// streamworks
+	int video_orientation_extension_id;
 } janus_streaming_rtp_source_stream;
 static void janus_streaming_rtp_source_stream_unref(janus_streaming_rtp_source_stream *stream) {
 	/* Decrease the counter */
@@ -2113,6 +2120,8 @@ int janus_streaming_init(janus_callbacks *callback, const char *config_path) {
 							rtpmap ? (char *)rtpmap->value : NULL,
 							fmtp ? (char *)fmtp->value : NULL,
 							doskew, bufferkf, simulcast, dosvc, textdata, buffermsg);
+
+							
 						if(stream == NULL) {
 							JANUS_LOG(LOG_ERR, "Can't add '%s' stream '%s', error creating source stream...\n", type->value, cat->name);
 							failed = TRUE;
@@ -2331,6 +2340,7 @@ int janus_streaming_init(janus_callbacks *callback, const char *config_path) {
 							cl = cl->next;
 							continue;
 						}
+
 						/* Add to the list of streams */
 						streams = g_list_append(streams, stream);
 					}
@@ -3242,6 +3252,8 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 					uint16_t port = 0, port2 = 0, port3 = 0;
 					uint16_t rtcpport = 0;
 					uint8_t codec = 0;
+					int	video_orientation_extension_id  = -1;
+
 					char *mtype = NULL, *mid = NULL, *label = NULL, *rtpmap = NULL, *fmtp = NULL, *mcast = NULL, *miface = NULL;
 					gboolean doskew = FALSE, bufferkf = FALSE, simulcast = FALSE, dosvc = FALSE, textdata = TRUE, buffermsg = FALSE;
 					json_t *jmtype = json_object_get(m, "type");
@@ -3306,6 +3318,13 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 						port3 = json_integer_value(videoport3);
 						json_t *vsvc = json_object_get(m, "svc");
 						dosvc = vsvc ? json_is_true(vsvc) : FALSE;
+
+						// streamwors
+						json_t *extension_id = json_object_get(m, "video_orientation_extension_id");
+						video_orientation_extension_id = json_integer_value(extension_id);
+
+						JANUS_LOG(LOG_INFO, "set video_orientation_extension_id %d \n",video_orientation_extension_id);
+
 					} else if(!strcasecmp(mtype, "data")) {
 						json_t *dbm = json_object_get(root, "buffermsg");
 						buffermsg = dbm ? json_is_true(dbm) : FALSE;
@@ -3342,6 +3361,9 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 						janus_mutex_unlock(&mountpoints_mutex);
 						goto prepare_response;
 					}
+					// streamworks
+					stream->video_orientation_extension_id = video_orientation_extension_id;
+
 					/* Add to the list of streams */
 					streams = g_list_append(streams, stream);
 				}
@@ -3497,6 +3519,8 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 						vmcast, vmiface, &video_iface,
 						vport, vport2, vport3, videortcpport != NULL, vrtcpport,
 						vcodec, vrtpmap, vfmtp, dovskew, bufferkf, simulcast, dosvc, FALSE, FALSE);
+
+
 					if(stream == NULL) {
 						JANUS_LOG(LOG_ERR, "Can't add 'rtp' stream '%s', error creating video source stream...\n", (const char *)json_string_value(name));
 						error_code = JANUS_STREAMING_ERROR_CANT_CREATE;
@@ -3506,6 +3530,7 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 						janus_mutex_unlock(&mountpoints_mutex);
 						goto prepare_response;
 					}
+					
 					/* Add to the list of streams */
 					streams = g_list_append(streams, stream);
 				}
@@ -5825,6 +5850,12 @@ done:
 						if(session->playoutdelay_ext) {
 							g_snprintf(buffer, 512, "a=extmap:%d %s\r\n", 3, JANUS_RTP_EXTMAP_PLAYOUT_DELAY);
 							janus_strlcat(sdptemp, buffer, 2048);
+						}
+
+						// streamworks
+						if (stream->video_orientation_extension_id > 0){
+							g_snprintf(buffer, 512, "a=extmap:%d %s\r\n", stream->video_orientation_extension_id, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION);
+							janus_strlcat(sdptemp, buffer, 2048);	
 						}
 					}
 #ifdef HAVE_SCTP
@@ -8907,6 +8938,28 @@ static void *janus_streaming_relay_thread(void *data) {
 						}
 					}
 					packet.data->type = stream->codecs.pt;
+
+					// streamworks
+					if(stream->video_orientation_extension_id > 0) {
+						gboolean c = FALSE, f = FALSE, r1 = FALSE, r0 = FALSE;
+						if(janus_rtp_header_extension_parse_video_orientation(buffer,bytes,stream->video_orientation_extension_id, &c, &f, &r1, &r0) == 0) {
+							packet.extensions.video_rotation = 0;
+							if(r1 && r0)
+								packet.extensions.video_rotation = 270;
+							else if(r1)
+								packet.extensions.video_rotation = 180;
+							else if(r0)
+								packet.extensions.video_rotation = 90;
+
+							packet.extensions.video_back_camera = c;
+							packet.extensions.video_flipped = f;
+						}else{
+							packet.extensions.video_rotation = -1;
+						}
+					} else {
+						packet.extensions.video_rotation = -1;
+					}
+
 					/* Is there a recorder? (FIXME notice we only record the first substream, if simulcasting) */
 					janus_rtp_header_update(packet.data, &stream->context[index], TRUE, 0);
 					if(stream->skew) {
@@ -9337,6 +9390,12 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 					rtp.extensions.min_delay = s->min_delay;
 					rtp.extensions.max_delay = s->max_delay;
 				}
+
+				// streamworks
+				rtp.extensions.video_rotation = packet->extensions.video_rotation;
+				rtp.extensions.video_back_camera = packet->extensions.video_back_camera;
+				rtp.extensions.video_flipped = packet->extensions.video_flipped;
+
 				if(gateway != NULL)
 					gateway->relay_rtp(session->handle, &rtp);
 				/* Restore the timestamp and sequence number to what the publisher set them to */
@@ -9358,6 +9417,13 @@ static void janus_streaming_relay_rtp_packet(gpointer data, gpointer user_data) 
 					rtp.extensions.min_delay = s->min_delay;
 					rtp.extensions.max_delay = s->max_delay;
 				}
+				// streamworks
+				if (packet->extensions.video_rotation > -1){
+					rtp.extensions.video_rotation = packet->extensions.video_rotation;
+					rtp.extensions.video_back_camera = packet->extensions.video_back_camera;
+					rtp.extensions.video_flipped = packet->extensions.video_flipped;
+				}
+					
 				if(gateway != NULL)
 					gateway->relay_rtp(session->handle, &rtp);
 				/* Restore the timestamp and sequence number to what the video source set them to */
