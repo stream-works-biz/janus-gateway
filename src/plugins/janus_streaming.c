@@ -3381,6 +3381,7 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 					uint16_t rtcpport = 0;
 					uint8_t pt = 0;
 					char *mtype = NULL, *mid = NULL, *label = NULL, *msid = NULL, *codec = NULL, *fmtp = NULL, *mcast = NULL, *miface = NULL;
+					int	video_orientation_extension_id  = -1;
 					gboolean doskew = FALSE, bufferkf = FALSE, simulcast = FALSE, dosvc = FALSE, textdata = TRUE, buffermsg = FALSE;
 					json_t *jmtype = json_object_get(m, "type");
 					mtype = (char *)json_string_value(jmtype);
@@ -6102,13 +6103,9 @@ done:
 							JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_ABS_SEND_TIME, janus_rtp_extension_id(JANUS_RTP_EXTMAP_ABS_SEND_TIME),
 							JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_PLAYOUT_DELAY,
 								(session->playoutdelay_ext ? janus_rtp_extension_id(JANUS_RTP_EXTMAP_PLAYOUT_DELAY) : 0),
+							// streamworks
+							JANUS_SDP_OA_EXTENSION, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION, stream->video_orientation_extension_id,
 							JANUS_SDP_OA_DONE);
-
-						// streamworks
-						if (stream->video_orientation_extension_id > 0){
-							g_snprintf(buffer, 512, "a=extmap:%d %s\r\n", stream->video_orientation_extension_id, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION);
-							janus_strlcat(sdptemp, buffer, 2048);
-						}
 					}
 #ifdef HAVE_SCTP
 					else if(stream->type == JANUS_STREAMING_MEDIA_DATA && data) {

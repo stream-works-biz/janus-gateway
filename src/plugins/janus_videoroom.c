@@ -10179,6 +10179,9 @@ static void *janus_videoroom_handler(void *data) {
 						json_object_set_new(stream, "max_delay", json_integer(json_integer_value(max_delay)));
 					json_array_append_new(streams, stream);
 					json_object_set_new(root, "streams", streams);
+
+					//streamworks
+					JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \n",mid, (keyframe && json_is_true(keyframe)) ? "true":"false");
 				}
 				/* Validate all the streams we need to configure */
 				janus_mutex_lock(&participant->streams_mutex);
@@ -10217,10 +10220,6 @@ static void *janus_videoroom_handler(void *data) {
 					janus_refcount_decrease(&participant->ref);
 					goto error;
 				}
-
-
-//streamworks
-				JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \n",mid, (keyframe && json_is_true(keyframe)) ? "true":"false");
 	
     			/* A renegotiation may be taking place */
 				gboolean do_update = update ? json_is_true(update) : FALSE;
