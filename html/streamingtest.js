@@ -1,52 +1,7 @@
-// We make use of this 'server' variable to provide the address of the
-// REST Janus API. By default, in this example we assume that Janus is
-// co-located with the web server hosting the HTML pages but listening
-// on a different port (8088, the default for HTTP in Janus), which is
-// why we make use of the 'window.location.hostname' base address. Since
-// Janus can also do HTTPS, and considering we don't really want to make
-// use of HTTP for Janus if your demos are served on HTTPS, we also rely
-// on the 'window.location.protocol' prefix to build the variable, in
-// particular to also change the port used to contact Janus (8088 for
-// HTTP and 8089 for HTTPS, if enabled).
-// In case you place Janus behind an Apache frontend (as we did on the
-// online demos at http://janus.conf.meetecho.com) you can just use a
-// relative path for the variable, e.g.:
-//
-// 		var server = "/janus";
-//
-// which will take care of this on its own.
-//
-//
-// If you want to use the WebSockets frontend to Janus, instead, you'll
-// have to pass a different kind of address, e.g.:
-//
-// 		var server = "ws://" + window.location.hostname + ":8188";
-//
-// Of course this assumes that support for WebSockets has been built in
-// when compiling the server. WebSockets support has not been tested
-// as much as the REST API, so handle with care!
-//
-//
-// If you have multiple options available, and want to let the library
-// autodetect the best way to contact your server (or pool of servers),
-// you can also pass an array of servers, e.g., to provide alternative
-// means of access (e.g., try WebSockets first and, if that fails, fall
-// back to plain HTTP) or just have failover servers:
-//
-//		var server = [
-//			"ws://" + window.location.hostname + ":8188",
-//			"/janus"
-//		];
-//
-// This will tell the library to try connecting to each of the servers
-// in the presented order. The first working server will be used for
-// the whole session.
-//
-var server = null;
-if(window.location.protocol === 'http:')
-	server = "http://" + window.location.hostname + ":8088/janus";
-else
-	server = "https://" + window.location.hostname + ":8089/janus";
+// We import the settings.js file to know which address we should contact
+// to talk to Janus, and optionally which STUN/TURN servers should be
+// used as well. Specifically, that file defines the "server" and
+// "iceServers" properties we'll pass when creating the Janus session.
 
 var janus = null;
 var streaming = null;
@@ -77,6 +32,11 @@ $(document).ready(function() {
 			janus = new Janus(
 				{
 					server: server,
+					iceServers: iceServers,
+					// Should the Janus API require authentication, you can specify either the API secret or user token here too
+					//		token: "mytoken",
+					//	or
+					//		apisecret: "serversecret",
 					success: function() {
 						// Attach to Streaming plugin
 						janus.attach(
@@ -166,8 +126,13 @@ $(document).ready(function() {
 										streaming.createAnswer(
 											{
 												jsep: jsep,
-												// We want recvonly audio/video and, if negotiated, datachannels
-												media: { audioSend: false, videoSend: false, data: true },
+												// We only specify data channels here, as this way in
+												// case they were offered we'll enable them. Since we
+												// don't mention audio or video tracks, we autoaccept them
+												// as recvonly (since we won't capture anything ourselves)
+												tracks: [
+													{ type: 'data' }
+												],
 												customizeSdp: function(jsep) {
 													if(stereo && jsep.sdp.indexOf("stereo=1") == -1) {
 														// Make sure that our offer contains stereo too
@@ -194,17 +159,6 @@ $(document).ready(function() {
 										mstreamId = "mstream0";
 									if(!on) {
 										// Track removed, get rid of the stream and the rendering
-										var stream = remoteTracks[mid];
-										if(stream) {
-											try {
-												var tracks = stream.getTracks();
-												for(var i in tracks) {
-													var mst = tracks[i];
-													if(mst)
-														mst.stop();
-												}
-											} catch(e) {}
-										}
 										$('#remotevideo' + mid).remove();
 										if(track.kind === "video") {
 											remoteVideos--;
@@ -226,8 +180,7 @@ $(document).ready(function() {
 									var stream = null;
 									if(track.kind === "audio") {
 										// New audio track: create a stream out of it, and use a hidden <audio> element
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										remoteTracks[mid] = stream;
 										Janus.log("Created remote audio stream:", stream);
 										$('#'+mstreamId).append('<audio class="hide" id="remotevideo' + mid + '" playsinline/>');
@@ -246,8 +199,7 @@ $(document).ready(function() {
 										// New video track: create a stream out of it
 										remoteVideos++;
 										$('.no-video-container').remove();
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										remoteTracks[mid] = stream;
 										Janus.log("Created remote video stream:", stream);
 										$('#'+mstreamId).append('<video class="rounded centered hide" id="remotevideo' + mid + '" width="100%" height="100%" playsinline/>');
@@ -400,6 +352,7 @@ function updateStreamsList() {
 			$('#streamslist a').unbind('click').click(function() {
 				selectedStream = $(this).attr("id");
 				$('#streamset').html($(this).html()).parent().removeClass('open');
+				$('#list .dropdown-backdrop').remove();
 				return false;
 
 			});

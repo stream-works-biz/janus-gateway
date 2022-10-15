@@ -1,53 +1,7 @@
-// We make use of this 'server' variable to provide the address of the
-// REST Janus API. By default, in this example we assume that Janus is
-// co-located with the web server hosting the HTML pages but listening
-// on a different port (8088, the default for HTTP in Janus), which is
-// why we make use of the 'window.location.hostname' base address. Since
-// Janus can also do HTTPS, and considering we don't really want to make
-// use of HTTP for Janus if your demos are served on HTTPS, we also rely
-// on the 'window.location.protocol' prefix to build the variable, in
-// particular to also change the port used to contact Janus (8088 for
-// HTTP and 8089 for HTTPS, if enabled).
-// In case you place Janus behind an Apache frontend (as we did on the
-// online demos at http://janus.conf.meetecho.com) you can just use a
-// relative path for the variable, e.g.:
-//
-// 		var server = "/janus";
-//
-// which will take care of this on its own.
-//
-//
-// If you want to use the WebSockets frontend to Janus, instead, you'll
-// have to pass a different kind of address, e.g.:
-//
-// 		var server = "ws://" + window.location.hostname + ":8188";
-//
-// Of course this assumes that support for WebSockets has been built in
-// when compiling the server. WebSockets support has not been tested
-// as much as the REST API, so handle with care!
-//
-//
-// If you have multiple options available, and want to let the library
-// autodetect the best way to contact your server (or pool of servers),
-// you can also pass an array of servers, e.g., to provide alternative
-// means of access (e.g., try WebSockets first and, if that fails, fall
-// back to plain HTTP) or just have failover servers:
-//
-//		var server = [
-//			"ws://" + window.location.hostname + ":8188",
-//			"/janus"
-//		];
-//
-// This will tell the library to try connecting to each of the servers
-// in the presented order. The first working server will be used for
-// the whole session.
-//
-var server = null;
-if(window.location.protocol === 'http:')
-	server = "http://" + window.location.hostname + ":8088/janus";
-else
-	server = "https://" + window.location.hostname + ":8089/janus";
-
+// We import the settings.js file to know which address we should contact
+// to talk to Janus, and optionally which STUN/TURN servers should be
+// used as well. Specifically, that file defines the "server" and
+// "iceServers" properties we'll pass when creating the Janus session.
 
 var janus = null;
 var screentest = null;
@@ -93,6 +47,11 @@ $(document).ready(function() {
 			janus = new Janus(
 				{
 					server: server,
+					iceServers: iceServers,
+					// Should the Janus API require authentication, you can specify either the API secret or user token here too
+					//		token: "mytoken",
+					//	or
+					//		apisecret: "serversecret",
 					success: function() {
 						// Attach to VideoRoom plugin
 						janus.attach(
@@ -177,7 +136,11 @@ $(document).ready(function() {
 													bootbox.alert("Safari requires a user gesture before the screen can be shared: close this dialog to do that. See issue #2455 for more details", function() {
 														screentest.createOffer(
 															{
-																media: { video: capture, audioSend: true, videoRecv: false},	// Screen sharing Publishers are sendonly
+																// We want to capture the screen and audio, but sendonly
+																tracks: [
+																	{ type: 'audio', capture: true, recv: false },
+																	{ type: 'screen', capture: true, recv: false }
+																],
 																success: function(jsep) {
 																	Janus.debug("Got publisher SDP!", jsep);
 																	var publish = { request: "configure", audio: true, video: true };
@@ -193,7 +156,11 @@ $(document).ready(function() {
 													// Other browsers should be fine, we try to call getDisplayMedia directly
 													screentest.createOffer(
 														{
-															media: { video: capture, audioSend: true, videoRecv: false},	// Screen sharing Publishers are sendonly
+															// We want sendonly audio and screensharing
+															tracks: [
+																{ type: 'audio', capture: true, recv: false },
+																{ type: 'screen', capture: true, recv: false }
+															],
 															success: function(jsep) {
 																Janus.debug("Got publisher SDP!", jsep);
 																var publish = { request: "configure", audio: true, video: true };
@@ -211,6 +178,8 @@ $(document).ready(function() {
 													var list = msg["publishers"];
 													Janus.debug("Got a list of available publishers/feeds:", list);
 													for(var f in list) {
+														if(list[f]["dummy"])
+															continue;
 														var id = list[f]["id"];
 														var display = list[f]["display"];
 														Janus.debug("  >> [" + id + "] " + display);
@@ -224,6 +193,8 @@ $(document).ready(function() {
 												var list = msg["publishers"];
 												Janus.debug("Got a list of available publishers/feeds:", list);
 												for(var f in list) {
+													if(list[f]["dummy"])
+														continue;
 													var id = list[f]["id"];
 													var display = list[f]["display"];
 													Janus.debug("  >> [" + id + "] " + display);
@@ -306,8 +277,7 @@ $(document).ready(function() {
 										// New video track: create a stream out of it
 										localVideos++;
 										$('#screencapture .no-video-container').remove();
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										localTracks[trackId] = stream;
 										Janus.log("Created local stream:", stream);
 										$('#screencapture').append('<video class="rounded centered" id="screenvideo' + trackId + '" width=100% autoplay playsinline muted="muted"/>');
@@ -383,39 +353,7 @@ function preShareScreen() {
 		return;
 	}
 	capture = "screen";
-	if(navigator.mozGetUserMedia) {
-		// Firefox needs a different constraint for screen and window sharing
-		bootbox.dialog({
-			title: "Share whole screen or a window?",
-			message: "Firefox handles screensharing in a different way: are you going to share the whole screen, or would you rather pick a single window/application to share instead?",
-			buttons: {
-				screen: {
-					label: "Share screen",
-					className: "btn-primary",
-					callback: function() {
-						capture = "screen";
-						shareScreen();
-					}
-				},
-				window: {
-					label: "Pick a window",
-					className: "btn-success",
-					callback: function() {
-						capture = "window";
-						shareScreen();
-					}
-				}
-			},
-			onEscape: function() {
-				$('#desc').removeAttr('disabled', true);
-				$('#create').removeAttr('disabled', true).click(preShareScreen);
-				$('#roomid').removeAttr('disabled', true);
-				$('#join').removeAttr('disabled', true).click(joinScreen);
-			}
-		});
-	} else {
-		shareScreen();
-	}
+	shareScreen();
 }
 
 function shareScreen() {
@@ -547,7 +485,13 @@ function newRemoteFeed(id, display) {
 					remoteFeed.createAnswer(
 						{
 							jsep: jsep,
-							media: { audioSend: false, videoSend: false },	// We want recvonly audio/video
+							// We only specify data channels here, as this way in
+							// case they were offered we'll enable them. Since we
+							// don't mention audio or video tracks, we autoaccept them
+							// as recvonly (since we won't capture anything ourselves)
+							tracks: [
+								{ type: 'data' }
+							],
 							success: function(jsep) {
 								Janus.debug("Got SDP!", jsep);
 								var body = { request: "start", room: room };
@@ -567,17 +511,6 @@ function newRemoteFeed(id, display) {
 				Janus.debug("Remote track (mid=" + mid + ") " + (on ? "added" : "removed") + ":", track);
 				if(!on) {
 					// Track removed, get rid of the stream and the rendering
-					var stream = remoteTracks[mid];
-					if(stream) {
-						try {
-							var tracks = stream.getTracks();
-							for(var i in tracks) {
-								var mst = tracks[i];
-								if(mst)
-									mst.stop();
-							}
-						} catch(e) {}
-					}
 					$('#screenvideo' + mid).remove();
 					if(track.kind === "video") {
 						remoteVideos--;
@@ -602,8 +535,7 @@ function newRemoteFeed(id, display) {
 				}
 				if(track.kind === "audio") {
 					// New audio track: create a stream out of it, and use a hidden <audio> element
-					stream = new MediaStream();
-					stream.addTrack(track.clone());
+					stream = new MediaStream([track]);
 					remoteTracks[mid] = stream;
 					Janus.log("Created remote audio stream:", stream);
 					$('#screencapture').append('<audio class="hide" id="screenvideo' + mid + '" playsinline/>');
@@ -625,8 +557,7 @@ function newRemoteFeed(id, display) {
 					// New video track: create a stream out of it
 					remoteVideos++;
 					$('#screencapture .no-video-container').remove();
-					stream = new MediaStream();
-					stream.addTrack(track.clone());
+					stream = new MediaStream([track]);
 					remoteFeed.remoteTracks[mid] = stream;
 					Janus.log("Created remote video stream:", stream);
 					$('#screencapture').append('<video class="rounded centered" id="screenvideo' + mid + '" width=100% playsinline/>');

@@ -282,7 +282,6 @@ static const char *janus_websockets_reason_string(enum lws_callback_reasons reas
 		CASE_STR(LWS_CALLBACK_CHANGE_MODE_POLL_FD);
 		CASE_STR(LWS_CALLBACK_LOCK_POLL);
 		CASE_STR(LWS_CALLBACK_UNLOCK_POLL);
-		CASE_STR(LWS_CALLBACK_OPENSSL_CONTEXT_REQUIRES_PRIVATE_KEY);
 		CASE_STR(LWS_CALLBACK_USER);
 		CASE_STR(LWS_CALLBACK_RECEIVE_PONG);
 		default:
@@ -406,15 +405,14 @@ static struct lws_vhost* janus_websockets_create_ws_server(
 		interface = (char *)item->value;
 
 	char *ip = NULL;
+	int ipv4_only = 0;
 	g_snprintf(item_name, 255, "%s_ip", prefix);
 	item = janus_config_get(config, config_container, janus_config_type_item, item_name);
 	if(item && item->value) {
 		ip = (char *)item->value;
-#ifdef __FreeBSD__
 		struct in_addr addr;
-		if(inet_net_pton(AF_INET, ip, &addr, sizeof(addr)) > 0)
+		if(inet_pton(AF_INET, ip, &addr) == 1)
 			ipv4_only = 1;
-#endif
 		char *iface = janus_websockets_get_interface_name(ip);
 		if(iface == NULL) {
 			JANUS_LOG(LOG_WARN, "No interface associated with %s? Falling back to no interface...\n", ip);
@@ -486,12 +484,10 @@ static struct lws_vhost* janus_websockets_create_ws_server(
 #endif
 	}
 
-#ifdef __FreeBSD__
 	if (ipv4_only) {
 		info.options |= LWS_SERVER_OPTION_DISABLE_IPV6;
 		ipv4_only = 0;
 	}
-#endif
 #if defined(LWS_USE_UNIX_SOCK) || defined(LWS_WITH_UNIX_SOCK)
 	if (unixpath)
 		info.options |= LWS_SERVER_OPTION_UNIX_SOCK;
@@ -530,9 +526,6 @@ int janus_websockets_init(janus_transport_callbacks *callback, const char *confi
 	JANUS_LOG(LOG_WARN, "libwebsockets has been built without IPv6 support, will bind to IPv4 only\n");
 #endif
 
-#ifdef __FreeBSD__
-	int ipv4_only = 0;
-#endif
 	/* This is the callback we'll need to invoke to contact the Janus core */
 	gateway = callback;
 

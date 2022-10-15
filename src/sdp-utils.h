@@ -261,8 +261,10 @@ JANUS_SDP_OA_MLINE = 1,
 JANUS_SDP_OA_ENABLED,
 /*! \brief When generating an offer or answer automatically, use this direction for media (depends on value that follows, sendrecv by default) */
 JANUS_SDP_OA_DIRECTION,
-/*! \brief When generating an offer automatically, use this mid media (depends on value that follows, needs to be a string) */
+/*! \brief When generating an offer automatically, use this mid (depends on value that follows, needs to be a string) */
 JANUS_SDP_OA_MID,
+/*! \brief When generating an offer or answer automatically, use this msid (depends on the two strings that follow, stream and track ID respectively) */
+JANUS_SDP_OA_MSID,
 /*! \brief When generating an offer or answer automatically, use this codec (depends on value that follows, opus/vp8 by default) */
 JANUS_SDP_OA_CODEC,
 /*! \brief When generating an offer (this is ignored for answers), negotiate this extension: needs two arguments, extmap value and extension ID (can be used multiple times) */
@@ -402,6 +404,11 @@ int janus_sdp_get_codec_pt_full(janus_sdp *sdp, int index, const char *codec, co
  * @param pt The payload type to find
  * @returns The codec name, if found, or NULL otherwise */
 const char *janus_sdp_get_codec_name(janus_sdp *sdp, int index, int pt);
+
+/*! \brief Helper to get the codec name associated to a specific rtpmap
+ * @param codec The rtpmap, as a string (e.g., "VP8/90000")
+ * @returns The codec name, if found (e.g., "vp8"), or NULL otherwise */
+const char *janus_sdp_get_rtpmap_codec(const char *rtpmap);
 
 /*! \brief Helper to get the rtpmap associated to a specific codec
  * @param codec The codec name, as a string (e.g., "opus")

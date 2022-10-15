@@ -1,52 +1,7 @@
-// We make use of this 'server' variable to provide the address of the
-// REST Janus API. By default, in this example we assume that Janus is
-// co-located with the web server hosting the HTML pages but listening
-// on a different port (8088, the default for HTTP in Janus), which is
-// why we make use of the 'window.location.hostname' base address. Since
-// Janus can also do HTTPS, and considering we don't really want to make
-// use of HTTP for Janus if your demos are served on HTTPS, we also rely
-// on the 'window.location.protocol' prefix to build the variable, in
-// particular to also change the port used to contact Janus (8088 for
-// HTTP and 8089 for HTTPS, if enabled).
-// In case you place Janus behind an Apache frontend (as we did on the
-// online demos at http://janus.conf.meetecho.com) you can just use a
-// relative path for the variable, e.g.:
-//
-// 		var server = "/janus";
-//
-// which will take care of this on its own.
-//
-//
-// If you want to use the WebSockets frontend to Janus, instead, you'll
-// have to pass a different kind of address, e.g.:
-//
-// 		var server = "ws://" + window.location.hostname + ":8188";
-//
-// Of course this assumes that support for WebSockets has been built in
-// when compiling the server. WebSockets support has not been tested
-// as much as the REST API, so handle with care!
-//
-//
-// If you have multiple options available, and want to let the library
-// autodetect the best way to contact your server (or pool of servers),
-// you can also pass an array of servers, e.g., to provide alternative
-// means of access (e.g., try WebSockets first and, if that fails, fall
-// back to plain HTTP) or just have failover servers:
-//
-//		var server = [
-//			"ws://" + window.location.hostname + ":8188",
-//			"/janus"
-//		];
-//
-// This will tell the library to try connecting to each of the servers
-// in the presented order. The first working server will be used for
-// the whole session.
-//
-var server = null;
-if(window.location.protocol === 'http:')
-	server = "http://" + window.location.hostname + ":8088/janus";
-else
-	server = "https://" + window.location.hostname + ":8089/janus";
+// We import the settings.js file to know which address we should contact
+// to talk to Janus, and optionally which STUN/TURN servers should be
+// used as well. Specifically, that file defines the "server" and
+// "iceServers" properties we'll pass when creating the Janus session.
 
 var janus = null;
 var echotest = null;
@@ -132,8 +87,51 @@ function initDevices(devices) {
 	});
 }
 
+var firstOffer = true;
 function restartCapture() {
-	// Negotiate WebRTC
+	let replaceAudio = $('#audio-device').val() !== audioDeviceId;
+	audioDeviceId = $('#audio-device').val();
+	let replaceVideo = $('#video-device').val() !== videoDeviceId;
+	videoDeviceId = $('#video-device').val();
+	if(!firstOffer) {
+		if(!replaceAudio && !replaceVideo) {
+			// Nothing to do, reset devices controls
+			$('#audio-device, #video-device').removeAttr('disabled');
+			$('#change-devices').removeAttr('disabled');
+			return;
+		}
+		// Just replacing tracks, no need for a renegotiation
+		let tracks = [];
+		if(replaceAudio) {
+			tracks.push({
+				type: 'audio',
+				mid: '0',	// We assume mid 0 is audio
+				capture: { deviceId: { exact: audioDeviceId } }
+			});
+		}
+		if(replaceVideo) {
+			tracks.push({
+				type: 'video',
+				mid: '1',	// We assume mid 1 is video
+				capture: { deviceId: { exact: videoDeviceId } }
+			});
+		}
+		// We use the replaceTracks helper function, that will in turn
+		// call the WebRTC replaceTrack API with the info we requested,
+		// without the need to do any renegotiation on the PeerConnection
+		echotest.replaceTracks({
+			tracks: tracks,
+			error: function(err) {
+				bootbox.alert(err.message);
+			}
+		});
+		// Reset devices controls
+		$('#audio-device, #video-device').removeAttr('disabled');
+		$('#change-devices').removeAttr('disabled');
+		return;
+	}
+	// We're only now starting, create a new PeerConnection
+	firstOffer = false;
 	var body = { audio: true, video: true };
 	// We can try and force a specific codec, by telling the plugin what we'd prefer
 	// For simplicity, you can set it via a query string (e.g., ?vcodec=vp9)
@@ -145,35 +143,15 @@ function restartCapture() {
 	// profile as well (e.g., ?vprofile=2 for VP9, or ?vprofile=42e01f for H.264)
 	if(vprofile)
 		body["videoprofile"] = vprofile;
-	Janus.debug("Sending message:", body);
-	echotest.send({ message: body });
 	Janus.debug("Trying a createOffer too (audio/video sendrecv)");
-	var replaceAudio = $('#audio-device').val() !== audioDeviceId;
-	audioDeviceId = $('#audio-device').val();
-	var replaceVideo = $('#video-device').val() !== videoDeviceId;
-	videoDeviceId = $('#video-device').val();
 	echotest.createOffer(
 		{
 			// We provide a specific device ID for both audio and video
-			media: {
-				audio: {
-					deviceId: {
-						exact: audioDeviceId
-					}
-				},
-				replaceAudio: replaceAudio,	// This is only needed in case of a renegotiation
-				video: {
-					deviceId: {
-						exact: videoDeviceId
-					}
-				},
-				replaceVideo: replaceVideo,	// This is only needed in case of a renegotiation
-				data: true	// Let's negotiate data channels as well
-			},
-			// If you want to test simulcasting (Chrome and Firefox only), then
-			// pass a ?simulcast=true when opening this demo page: it will turn
-			// the following 'simulcast' property to pass to janus.js to true
-			simulcast: doSimulcast,
+			tracks: [
+				{ type: 'audio', capture: { deviceId: { exact: audioDeviceId }}, recv: true },
+				{ type: 'video', capture: { deviceId: { exact: videoDeviceId }}, recv: true, simulcast: doSimulcast },
+				{ type: 'data' }	// Let's negotiate data channels as well
+			],
 			success: function(jsep) {
 				Janus.debug("Got SDP!", jsep);
 				echotest.send({ message: body, jsep: jsep });
@@ -200,11 +178,7 @@ $(document).ready(function() {
 			janus = new Janus(
 				{
 					server: server,
-					// No "iceServers" is provided, meaning janus.js will use a default STUN server
-					// Here are some examples of how an iceServers field may look like to support TURN
-					// 		iceServers: [{urls: "turn:yourturnserver.com:3478", username: "janususer", credential: "januspwd"}],
-					// 		iceServers: [{urls: "turn:yourturnserver.com:443?transport=tcp", username: "janususer", credential: "januspwd"}],
-					// 		iceServers: [{urls: "turns:yourturnserver.com:443?transport=tcp", username: "janususer", credential: "januspwd"}],
+					iceServers: iceServers,
 					// Should the Janus API require authentication, you can specify either the API secret or user token here too
 					//		token: "mytoken",
 					//	or
@@ -377,8 +351,7 @@ $(document).ready(function() {
 										// New video track: create a stream out of it
 										localVideos++;
 										$('#videoleft .no-video-container').remove();
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										localTracks[trackId] = stream;
 										Janus.log("Created local stream:", stream);
 										$('#videoleft').append('<video class="rounded centered" id="myvideo' + trackId + '" width="100%" height="100%" autoplay playsinline muted="muted"/>');
@@ -403,17 +376,6 @@ $(document).ready(function() {
 									Janus.debug("Remote track (mid=" + mid + ") " + (on ? "added" : "removed") + ":", track);
 									if(!on) {
 										// Track removed, get rid of the stream and the rendering
-										var stream = remoteTracks[mid];
-										if(stream) {
-											try {
-												var tracks = stream.getTracks();
-												for(var i in tracks) {
-													var mst = tracks[i];
-													if(mst)
-														mst.stop();
-												}
-											} catch(e) {}
-										}
 										$('#peervideo' + mid).remove();
 										if(track.kind === "video") {
 											remoteVideos--;
@@ -439,8 +401,7 @@ $(document).ready(function() {
 									}
 									if(track.kind === "audio") {
 										// New audio track: create a stream out of it, and use a hidden <audio> element
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										remoteTracks[mid] = stream;
 										Janus.log("Created remote audio stream:", stream);
 										if($('#peervideo'+mid).length === 0)
@@ -460,8 +421,7 @@ $(document).ready(function() {
 										// New video track: create a stream out of it
 										remoteVideos++;
 										$('#videoright .no-video-container').remove();
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										remoteTracks[mid] = stream;
 										Janus.log("Created remote video stream:", stream);
 										if($('#peervideo'+mid).length === 0)

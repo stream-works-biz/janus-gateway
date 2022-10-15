@@ -1,52 +1,7 @@
-// We make use of this 'server' variable to provide the address of the
-// REST Janus API. By default, in this example we assume that Janus is
-// co-located with the web server hosting the HTML pages but listening
-// on a different port (8088, the default for HTTP in Janus), which is
-// why we make use of the 'window.location.hostname' base address. Since
-// Janus can also do HTTPS, and considering we don't really want to make
-// use of HTTP for Janus if your demos are served on HTTPS, we also rely
-// on the 'window.location.protocol' prefix to build the variable, in
-// particular to also change the port used to contact Janus (8088 for
-// HTTP and 8089 for HTTPS, if enabled).
-// In case you place Janus behind an Apache frontend (as we did on the
-// online demos at http://janus.conf.meetecho.com) you can just use a
-// relative path for the variable, e.g.:
-//
-// 		var server = "/janus";
-//
-// which will take care of this on its own.
-//
-//
-// If you want to use the WebSockets frontend to Janus, instead, you'll
-// have to pass a different kind of address, e.g.:
-//
-// 		var server = "ws://" + window.location.hostname + ":8188";
-//
-// Of course this assumes that support for WebSockets has been built in
-// when compiling the server. WebSockets support has not been tested
-// as much as the REST API, so handle with care!
-//
-//
-// If you have multiple options available, and want to let the library
-// autodetect the best way to contact your server (or pool of servers),
-// you can also pass an array of servers, e.g., to provide alternative
-// means of access (e.g., try WebSockets first and, if that fails, fall
-// back to plain HTTP) or just have failover servers:
-//
-//		var server = [
-//			"ws://" + window.location.hostname + ":8188",
-//			"/janus"
-//		];
-//
-// This will tell the library to try connecting to each of the servers
-// in the presented order. The first working server will be used for
-// the whole session.
-//
-var server = null;
-if(window.location.protocol === 'http:')
-	server = "http://" + window.location.hostname + ":8088/janus";
-else
-	server = "https://" + window.location.hostname + ":8089/janus";
+// We import the settings.js file to know which address we should contact
+// to talk to Janus, and optionally which STUN/TURN servers should be
+// used as well. Specifically, that file defines the "server" and
+// "iceServers" properties we'll pass when creating the Janus session.
 
 var janus = null;
 
@@ -58,7 +13,7 @@ var localTracks = {}, localVideos = 0,
 	remoteTracks = {}, remoteVideos = 0;
 var spinner = null;
 
-var videoenabled = true;
+var callstarted = false, videoenabled = true;
 var srtp = undefined ; // use "sdes_mandatory" to test SRTP-SDES
 
 $(document).ready(function() {
@@ -76,6 +31,11 @@ $(document).ready(function() {
 			janus = new Janus(
 				{
 					server: server,
+					iceServers: iceServers,
+					// Should the Janus API require authentication, you can specify either the API secret or user token here too
+					//		token: "mytoken",
+					//	or
+					//		apisecret: "serversecret",
 					success: function() {
 						// Attach to NoSIP plugin as a caller
 						janus.attach(
@@ -94,9 +54,13 @@ $(document).ready(function() {
 									// Negotiate WebRTC in a second (just to make sure both caller and callee handles exist)
 									setTimeout(function() {
 										Janus.debug("[caller] Trying a createOffer too (audio/video sendrecv)");
+										// We want bidirectional audio and video by default
 										caller.createOffer(
 											{
-												media: {audio: true, video: videoenabled},
+												tracks: [
+													{ type: 'audio', capture: true, recv: true },
+													{ type: 'video', capture: true, recv: true }
+												],
 												success: function(jsep) {
 													Janus.debug("[caller] Got SDP!", jsep);
 													// We now have a WebRTC SDP: to get a barebone SDP legacy
@@ -150,6 +114,10 @@ $(document).ready(function() {
 								webrtcState: function(on) {
 									Janus.log("[caller] Janus says our WebRTC PeerConnection is " + (on ? "up" : "down") + " now");
 									$("#videoleft").parent().unblock();
+									if(on) {
+										callstarted = true;
+										$('#togglevideo').removeAttr('disabled').click(renegotiateVideo);
+									}
 								},
 								slowLink: function(uplink, lost, mid) {
 									Janus.warn("[caller] Janus reports problems " + (uplink ? "sending" : "receiving") +
@@ -189,6 +157,12 @@ $(document).ready(function() {
 											if(jsep) {
 												Janus.debug("[caller] Handling SDP as well...", jsep);
 												caller.handleRemoteJsep({ jsep: jsep });
+												// If this was a renegotiation, update the button
+												if(callstarted) {
+													$('#togglevideo')
+														.text(videoenabled ? 'Disable video' : 'Enable video')
+														.removeAttr('disabled');
+												}
 											}
 										}
 									}
@@ -252,8 +226,7 @@ $(document).ready(function() {
 										// New video track: create a stream out of it
 										localVideos++;
 										$('#videoleft .no-video-container').remove();
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										localTracks[trackId] = stream;
 										Janus.log("Created local stream:", stream);
 										$('#videoleft').append('<video class="rounded centered" id="myvideot' + trackId + '" width="100%" height="100%" autoplay playsinline muted="muted"/>');
@@ -275,17 +248,6 @@ $(document).ready(function() {
 									Janus.debug("[caller] Remote track (mid=" + mid + ") " + (on ? "added" : "removed") + ":", track);
 									if(!on) {
 										// Track removed, get rid of the stream and the rendering
-										var stream = remoteTracks[mid];
-										if(stream) {
-											try {
-												var tracks = stream.getTracks();
-												for(var i in tracks) {
-													var mst = tracks[i];
-													if(mst)
-														mst.stop();
-												}
-											} catch(e) {}
-										}
 										$('#peervideo' + mid).remove();
 										if(track.kind === "video") {
 											remoteVideos--;
@@ -323,8 +285,7 @@ $(document).ready(function() {
 									}
 									if(track.kind === "audio") {
 										// New audio track: create a stream out of it, and use a hidden <audio> element
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										remoteTracks[mid] = stream;
 										Janus.log("[caller] Created remote audio stream:", stream);
 										$('#videoright').append('<audio class="hide" id="peervideo' + mid + '" autoplay playsinline/>');
@@ -343,8 +304,7 @@ $(document).ready(function() {
 										// New video track: create a stream out of it
 										remoteVideos++;
 										$('#videoright .no-video-container').remove();
-										stream = new MediaStream();
-										stream.addTrack(track.clone());
+										stream = new MediaStream([track]);
 										remoteTracks[mid] = stream;
 										Janus.log("[caller] Created remote video stream:", stream);
 										$('#videoright').append('<video class="rounded centered" id="peervideo' + mid + '" width="100%" height="100%" autoplay playsinline/>');
@@ -434,7 +394,11 @@ $(document).ready(function() {
 												{
 													// This is the WebRTC enriched offer the plugin gave us
 													jsep: jsep,
-													// No media provided: by default, it's sendrecv for audio and video
+													// We want bidirectional audio and video, if offered
+													tracks: [
+														{ type: 'audio', capture: true, recv: true },
+														{ type: 'video', capture: true, recv: true }
+													],
 													success: function(jsep) {
 														Janus.debug("[callee] Got SDP!", jsep);
 														// We now have a WebRTC SDP: to get a barebone SDP legacy
@@ -497,3 +461,39 @@ $(document).ready(function() {
 		});
 	}});
 });
+
+// We use this helper function to remove/add video to the call
+function renegotiateVideo() {
+	$('#togglevideo').attr('disabled', true);
+	let modifiedTrack = null;
+	if(videoenabled) {
+		// Renegotiate the call removing local video
+		videoenabled = false;
+		// We only want to modify the video track, removing our own
+		modifiedTrack = [{ type: 'video', mid: '1', remove: true }]
+	} else {
+		// Renegotiate the call removing local video
+		videoenabled = true;
+		// We only want to modify the video track, adding our own
+		modifiedTrack = [{ type: 'video', mid: '1', replace: true, capture: true }]
+	}
+	// Create an updated offer
+	caller.createOffer(
+		{
+			tracks: modifiedTrack,
+			success: function(jsep) {
+				Janus.debug("[caller] Got SDP!", jsep);
+				// As before, we ask the NoSIP plugin to generate a
+				// plain SDP we can then pass to the callee handle
+				var body = {
+					request: "generate",
+					srtp: srtp
+				};
+				caller.send({ message: body, jsep: jsep });
+			},
+			error: function(error) {
+				Janus.error("WebRTC error:", error);
+				bootbox.alert("WebRTC error... " + error.message);
+			}
+		});
+}

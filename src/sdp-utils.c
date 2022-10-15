@@ -261,6 +261,8 @@ const char *janus_sdp_oa_type_str(janus_sdp_oa_type type) {
 			return "JANUS_SDP_OA_ENABLED";
 		case JANUS_SDP_OA_MID:
 			return "JANUS_SDP_OA_MID";
+		case JANUS_SDP_OA_MSID:
+			return "JANUS_SDP_OA_MSID";
 		case JANUS_SDP_OA_DIRECTION:
 			return "JANUS_SDP_OA_DIRECTION";
 		case JANUS_SDP_OA_CODEC:
@@ -325,7 +327,7 @@ janus_sdp *janus_sdp_parse(const char *sdp, char *error, size_t errlen) {
 				index++;
 				continue;
 			}
-			if(strlen(line) < 3) {
+			if(strnlen(line, 3) < 3) {
 				if(error)
 					g_snprintf(error, errlen, "Invalid line (%zu bytes): %s", strlen(line), line);
 				success = FALSE;
@@ -463,7 +465,7 @@ janus_sdp *janus_sdp_parse(const char *sdp, char *error, size_t errlen) {
 						/* Start with media type, port and protocol */
 						char type[32];
 						char proto[64];
-						if(strlen(line) > 200) {
+						if(strnlen(line, 200 + 1) > 200) {
 							janus_sdp_mline_destroy(m);
 							if(error)
 								g_snprintf(error, errlen, "Invalid m= line (too long): %zu", strlen(line));
@@ -927,6 +929,43 @@ const char *janus_sdp_get_codec_name(janus_sdp *sdp, int index, int pt) {
 	return NULL;
 }
 
+const char *janus_sdp_get_rtpmap_codec(const char *rtpmap) {
+	if(rtpmap == NULL)
+		return NULL;
+	const char *codec = NULL;
+	char *rtpmap_val = g_ascii_strdown(rtpmap, -1);
+	if(strstr(rtpmap_val, "opus/") == rtpmap_val)
+		codec = "opus";
+	else if(strstr(rtpmap_val, "multiopus/") == rtpmap_val)
+		codec = "multiopus";
+	else if(strstr(rtpmap_val, "pcmu/") == rtpmap_val)
+		codec = "pcmu";
+	else if(strstr(rtpmap_val, "pcma/") == rtpmap_val)
+		codec = "pcma";
+	else if(strstr(rtpmap_val, "g722/") == rtpmap_val)
+		codec = "g722";
+	else if(strstr(rtpmap_val, "isac/16") == rtpmap_val)
+		codec = "isac16";
+	else if(strstr(rtpmap_val, "isac/32") == rtpmap_val)
+		codec = "isac32";
+	else if(strstr(rtpmap_val, "telephone-event/") == rtpmap_val)
+		codec = "dtmf";
+	else if(strstr(rtpmap_val, "vp8/") == rtpmap_val)
+		codec = "vp8";
+	else if(strstr(rtpmap_val, "vp9/") == rtpmap_val)
+		codec = "vp9";
+	else if(strstr(rtpmap_val, "h264/") == rtpmap_val)
+		codec = "h264";
+	else if(strstr(rtpmap_val, "av1/") == rtpmap_val)
+		codec = "av1";
+	else if(strstr(rtpmap_val, "h265/") == rtpmap_val)
+		codec = "h265";
+	if(codec == NULL)
+		JANUS_LOG(LOG_ERR, "Unsupported rtpmap '%s'\n", rtpmap);
+	g_free(rtpmap_val);
+	return codec;
+}
+
 const char *janus_sdp_get_codec_rtpmap(const char *codec) {
 	if(codec == NULL)
 		return NULL;
@@ -1308,8 +1347,8 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 	janus_sdp_mtype type = JANUS_SDP_OTHER;
 	gboolean audio_dtmf = FALSE, video_rtcpfb = TRUE, data_legacy = FALSE;
 	int pt = -1, opusred_pt = -1;
-	const char *codec = NULL, *mid = NULL, *fmtp = NULL,
-		*vp9_profile = NULL, *h264_profile = NULL;
+	const char *codec = NULL, *mid = NULL, *msid = NULL, *mstid = NULL,
+		*fmtp = NULL, *vp9_profile = NULL, *h264_profile = NULL;
 	janus_sdp_mdirection mdir = JANUS_SDP_DEFAULT;
 	GHashTable *extmaps = NULL, *extids = NULL, *m_extids = NULL;
 
@@ -1337,6 +1376,7 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 					if(janus_sdp_generate_offer_mline(offer,
 						JANUS_SDP_OA_MLINE, JANUS_SDP_AUDIO,
 						JANUS_SDP_OA_MID, mid,
+						JANUS_SDP_OA_MSID, msid, mstid,
 						JANUS_SDP_OA_OPUSRED_PT, opusred_pt,
 						JANUS_SDP_OA_CODEC, codec,
 						JANUS_SDP_OA_DIRECTION, mdir,
@@ -1359,6 +1399,7 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 					if(janus_sdp_generate_offer_mline(offer,
 						JANUS_SDP_OA_MLINE, JANUS_SDP_VIDEO,
 						JANUS_SDP_OA_MID, mid,
+						JANUS_SDP_OA_MSID, msid, mstid,
 						JANUS_SDP_OA_PT, pt,
 						JANUS_SDP_OA_CODEC, codec,
 						JANUS_SDP_OA_DIRECTION, mdir,
@@ -1407,6 +1448,8 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 			pt = -1;
 			opusred_pt = -1;
 			mid = NULL;
+			msid = NULL;
+			mstid = NULL;
 			codec = NULL;
 			fmtp = NULL;
 			vp9_profile = NULL;
@@ -1447,6 +1490,9 @@ janus_sdp *janus_sdp_generate_offer(const char *name, const char *address, ...) 
 			mline_enabled = va_arg(args, gboolean);
 		} else if(property == JANUS_SDP_OA_MID) {
 			mid = va_arg(args, char *);
+		} else if(property == JANUS_SDP_OA_MSID) {
+			msid = va_arg(args, char *);
+			mstid = va_arg(args, char *);
 		} else if(property == JANUS_SDP_OA_DIRECTION) {
 			mdir = va_arg(args, janus_sdp_mdirection);
 		} else if(property == JANUS_SDP_OA_CODEC) {
@@ -1514,8 +1560,8 @@ int janus_sdp_generate_offer_mline(janus_sdp *offer, ...) {
 	janus_sdp_mtype type = JANUS_SDP_OTHER;
 	gboolean audio_dtmf = FALSE, video_rtcpfb = TRUE, data_legacy = FALSE;
 	int pt = -1, opusred_pt = -1;
-	const char *codec = NULL, *mid = NULL, *rtpmap = NULL, *fmtp = NULL,
-		*vp9_profile = NULL, *h264_profile = NULL;
+	const char *codec = NULL, *mid = NULL, *msid = NULL, *mstid = NULL,
+		*rtpmap = NULL, *fmtp = NULL, *vp9_profile = NULL, *h264_profile = NULL;
 	janus_sdp_mdirection mdir = JANUS_SDP_DEFAULT;
 	GHashTable *extmaps = NULL, *extids = NULL;
 	gboolean extids_allocated = FALSE;
@@ -1559,6 +1605,9 @@ int janus_sdp_generate_offer_mline(janus_sdp *offer, ...) {
 			codec = va_arg(args, char *);
 		} else if(property == JANUS_SDP_OA_MID) {
 			mid = va_arg(args, char *);
+		} else if(property == JANUS_SDP_OA_MSID) {
+			msid = va_arg(args, char *);
+			mstid = va_arg(args, char *);
 		} else if(property == JANUS_SDP_OA_PT) {
 			pt = va_arg(args, int);
 		} else if(property == JANUS_SDP_OA_OPUSRED_PT) {
@@ -1673,6 +1722,11 @@ int janus_sdp_generate_offer_mline(janus_sdp *offer, ...) {
 	/* Any mid we should set? */
 	if(mid != NULL) {
 		a = janus_sdp_attribute_create("mid", "%s", mid);
+		m->attributes = g_list_append(m->attributes, a);
+	}
+	/* Any msid we should set? */
+	if(type != JANUS_SDP_APPLICATION && msid != NULL && mstid != NULL) {
+		a = janus_sdp_attribute_create("msid", "%s %s", msid, mstid);
 		m->attributes = g_list_append(m->attributes, a);
 	}
 	if(type == JANUS_SDP_AUDIO || type == JANUS_SDP_VIDEO) {
@@ -1840,7 +1894,8 @@ int janus_sdp_generate_answer_mline(janus_sdp *offer, janus_sdp *answer, janus_s
 	gboolean mline_enabled = TRUE;
 	janus_sdp_mtype type = JANUS_SDP_OTHER;
 	gboolean audio_dtmf = FALSE, audio_opusred = FALSE, video_rtcpfb = TRUE;
-	const char *codec = NULL, *fmtp = NULL, *vp9_profile = NULL, *h264_profile = NULL;
+	const char *codec = NULL, *msid = NULL, *mstid = NULL,
+		*fmtp = NULL, *vp9_profile = NULL, *h264_profile = NULL;
 	char *custom_audio_fmtp = NULL;
 	GList *extmaps = NULL;
 	janus_sdp_mdirection mdir = JANUS_SDP_DEFAULT;
@@ -1872,6 +1927,9 @@ int janus_sdp_generate_answer_mline(janus_sdp *offer, janus_sdp *answer, janus_s
 			mdir = va_arg(args, janus_sdp_mdirection);
 		} else if(property == JANUS_SDP_OA_CODEC) {
 			codec = va_arg(args, char *);
+		} else if(property == JANUS_SDP_OA_MSID) {
+			msid = va_arg(args, char *);
+			mstid = va_arg(args, char *);
 		} else if(property == JANUS_SDP_OA_FMTP) {
 			fmtp = va_arg(args, char *);
 		} else if(property == JANUS_SDP_OA_VP9_PROFILE) {
@@ -2039,6 +2097,11 @@ int janus_sdp_generate_answer_mline(janus_sdp *offer, janus_sdp *answer, janus_s
 				}
 			}
 			am->ptypes = g_list_append(am->ptypes, GINT_TO_POINTER(pt));
+			/* Any msid we should set? */
+			if(msid != NULL && mstid != NULL) {
+				janus_sdp_attribute *a = janus_sdp_attribute_create("msid", "%s %s", msid, mstid);
+				am->attributes = g_list_append(am->attributes, a);
+			}
 			/* Add the related attributes */
 			if(am->type == JANUS_SDP_AUDIO) {
 				/* Add rtpmap attribute */
@@ -2142,6 +2205,8 @@ int janus_sdp_generate_answer_mline(janus_sdp *offer, janus_sdp *answer, janus_s
 										direction = "/recvonly";
 										break;
 									case JANUS_SDP_RECVONLY:
+										direction = "/sendonly";
+										break;
 									case JANUS_SDP_INACTIVE:
 										direction = "/inactive";
 										break;

@@ -31,7 +31,7 @@
 
 /* Pre-parse SDP: is this SDP valid? how many audio/video lines? any features to take into account? */
 janus_sdp *janus_sdp_preparse(void *ice_handle, const char *jsep_sdp, char *error_str, size_t errlen,
-		int *audio, int *video, int *data) {
+		janus_dtls_role *dtls_role, int *audio, int *video, int *data) {
 	if(!ice_handle || !jsep_sdp) {
 		JANUS_LOG(LOG_ERR, "  Can't preparse, invalid arguments\n");
 		return NULL;
@@ -42,6 +42,34 @@ janus_sdp *janus_sdp_preparse(void *ice_handle, const char *jsep_sdp, char *erro
 		JANUS_LOG(LOG_ERR, "  Error parsing SDP? %s\n", error_str ? error_str : "(unknown reason)");
 		/* Invalid SDP */
 		return NULL;
+	}
+	gboolean dtls_role_found = FALSE;
+	if(dtls_role) {
+		/* We're interested in checking which role was advertised, traverse global attributes too */
+		GList *tempA = parsed_sdp->attributes;
+		while(tempA) {
+			janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
+			if(a->name && !strcasecmp(a->name, "setup")) {
+				if(a->value == NULL) {
+					JANUS_LOG(LOG_ERR, "[%"SCNu64"] Invalid setup attribute (no value)\n", handle->handle_id);
+					janus_sdp_destroy(parsed_sdp);
+					return NULL;
+				}
+				if(!strcasecmp(a->value, "actpass")) {
+					JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer advertised 'actpass' DTLS role, we'll be a DTLS client\n", handle->handle_id);
+					*dtls_role = JANUS_DTLS_ROLE_ACTPASS;
+				} else if(!strcasecmp(a->value, "passive")) {
+					JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer advertised 'passive' DTLS role, we'll be a DTLS client\n", handle->handle_id);
+					*dtls_role = JANUS_DTLS_ROLE_SERVER;
+				} else if(!strcasecmp(a->value, "active")) {
+					JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer advertised 'active' DTLS role, we'll be a DTLS server\n", handle->handle_id);
+					*dtls_role = JANUS_DTLS_ROLE_CLIENT;
+				}
+				dtls_role_found = TRUE;
+				break;
+			}
+			tempA = tempA->next;
+		}
 	}
 	/* Look for m-lines */
 	GList *temp = parsed_sdp->m_lines;
@@ -72,13 +100,30 @@ janus_sdp *janus_sdp_preparse(void *ice_handle, const char *jsep_sdp, char *erro
 						return NULL;
 					}
 					if((m->type == JANUS_SDP_AUDIO || m->type == JANUS_SDP_VIDEO) && m->port > 0) {
-						if(strlen(a->value) > 16) {
+						if(strnlen(a->value, 16 + 1) > 16) {
 							JANUS_LOG(LOG_ERR, "[%"SCNu64"] mid on m-line #%d too large: (%zu > 16)\n",
 								handle->handle_id, m->index, strlen(a->value));
 							janus_sdp_destroy(parsed_sdp);
 							return NULL;
 						}
 					}
+				} else if(dtls_role && !dtls_role_found && !strcasecmp(a->name, "setup")) {
+					if(a->value == NULL) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Invalid setup attribute (no value)\n", handle->handle_id);
+						janus_sdp_destroy(parsed_sdp);
+						return NULL;
+					}
+					if(!strcasecmp(a->value, "actpass")) {
+						JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer advertised 'actpass' DTLS role, we'll be a DTLS client\n", handle->handle_id);
+						*dtls_role = JANUS_DTLS_ROLE_ACTPASS;
+					} else if(!strcasecmp(a->value, "passive")) {
+						JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer advertised 'passive' DTLS role, we'll be a DTLS client\n", handle->handle_id);
+						*dtls_role = JANUS_DTLS_ROLE_SERVER;
+					} else if(!strcasecmp(a->value, "active")) {
+						JANUS_LOG(LOG_VERB, "[%"SCNu64"] Peer advertised 'active' DTLS role, we'll be a DTLS server\n", handle->handle_id);
+						*dtls_role = JANUS_DTLS_ROLE_CLIENT;
+					}
+					dtls_role_found = TRUE;
 				}
 			}
 			tempA = tempA->next;
@@ -183,6 +228,13 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 				if(m->ptypes != NULL) {
 					g_list_free(medium->payload_types);
 					medium->payload_types = g_list_copy(m->ptypes);
+					if(pc->payload_types == NULL)
+						pc->payload_types = g_hash_table_new(NULL, NULL);
+					GList *temp = medium->payload_types;
+					while(temp) {
+						g_hash_table_insert(pc->payload_types, temp->data, temp->data);
+						temp = temp->next;
+					}
 				}
 			} else {
 				/* Medium rejected? */
@@ -246,14 +298,14 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 			temp = temp->next;
 			continue;
 		}
-		/* Look for mid, ICE credentials and fingerprint first: check media attributes */
+		/* Look for mid, msid, ICE credentials and fingerprint first: check media attributes */
 		GList *tempA = m->attributes;
 		while(tempA) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
 			if(a->name && a->value) {
 				if(!strcasecmp(a->name, "mid")) {
 					/* Found mid attribute */
-					if(strlen(a->value) > 16) {
+					if(strnlen(a->value, 16 + 1) > 16) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] mid on m-line #%d too large: (%zu > 16)\n",
 							handle->handle_id, m->index, strlen(a->value));
 						return -2;
@@ -275,6 +327,26 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 					}
 					if(handle->pc_mid == NULL)
 						handle->pc_mid = g_strdup(a->value);
+				} else if(!strcasecmp(a->name, "msid")) {
+					/* Found msid attribute */
+					char msid[65], mstid[65];
+					msid[0] = '\0';
+					mstid[0] = '\0';
+					if(sscanf(a->value, "%64s %64s", msid, mstid) != 2) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Invalid msid on m-line #%d\n",
+							handle->handle_id, m->index);
+						return -2;
+					}
+					if(medium->remote_msid == NULL || strcasecmp(medium->remote_msid, msid)) {
+						char *old_msid = medium->remote_msid;
+						medium->remote_msid = g_strdup(msid);
+						g_free(old_msid);
+					}
+					if(medium->remote_mstid == NULL || strcasecmp(medium->remote_mstid, mstid)) {
+						char *old_mstid = medium->remote_mstid;
+						medium->remote_mstid = g_strdup(mstid);
+						g_free(old_mstid);
+					}
 				} else if(!strcasecmp(a->name, "fingerprint")) {
 					JANUS_LOG(LOG_VERB, "[%"SCNu64"] Fingerprint (local) : %s\n", handle->handle_id, a->value);
 					if(strcasestr(a->value, "sha-256 ") == a->value) {
@@ -526,13 +598,25 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 						} else {
 							rtx = TRUE;
 							janus_flags_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX);
-							if(medium->rtx_payload_types == NULL)
-								medium->rtx_payload_types = g_hash_table_new(NULL, NULL);
-							g_hash_table_insert(medium->rtx_payload_types, GINT_TO_POINTER(ptype), GINT_TO_POINTER(rtx_ptype));
+							if(pc->rtx_payload_types == NULL)
+								pc->rtx_payload_types = g_hash_table_new(NULL, NULL);
+							if(pc->rtx_payload_types_rev == NULL)
+								pc->rtx_payload_types_rev = g_hash_table_new(NULL, NULL);
+							int map_pt = GPOINTER_TO_INT(g_hash_table_lookup(pc->rtx_payload_types_rev, GINT_TO_POINTER(rtx_ptype)));
+							if(map_pt && map_pt != ptype) {
+								JANUS_LOG(LOG_WARN, "[%"SCNu64"] RTX payload type %d already mapped to %d, skipping fmtp/apt mapping with %d...\n",
+									handle->handle_id, rtx_ptype, map_pt, ptype);
+							} else {
+								g_hash_table_insert(pc->rtx_payload_types, GINT_TO_POINTER(ptype), GINT_TO_POINTER(rtx_ptype));
+								g_hash_table_insert(pc->rtx_payload_types_rev, GINT_TO_POINTER(rtx_ptype), GINT_TO_POINTER(ptype));
+								if(medium->rtx_payload_types == NULL)
+									medium->rtx_payload_types = g_hash_table_new(NULL, NULL);
+								g_hash_table_insert(medium->rtx_payload_types, GINT_TO_POINTER(ptype), GINT_TO_POINTER(rtx_ptype));
+							}
 						}
 					}
 				} else if(!strcasecmp(a->name, "rtpmap")) {
-					if(a->value) {
+					if(a->value && strstr(a->value, "rtx") == NULL) {
 						int ptype = atoi(a->value);
 						if(ptype > -1) {
 							char *cr = strchr(a->value, '/');
@@ -540,12 +624,21 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 								cr++;
 								uint32_t clock_rate = 0;
 								if(janus_string_to_uint32(cr, &clock_rate) == 0) {
+									if(pc->clock_rates == NULL)
+										pc->clock_rates = g_hash_table_new(NULL, NULL);
 									if(medium->clock_rates == NULL)
 										medium->clock_rates = g_hash_table_new(NULL, NULL);
-									g_hash_table_insert(medium->clock_rates, GINT_TO_POINTER(ptype), GUINT_TO_POINTER(clock_rate));
-									/* Check if opus/red is negotiated */
-									if(strstr(a->value, "red/48000/2"))
-										medium->opusred_pt = ptype;
+									uint32_t map_cr = GPOINTER_TO_UINT(g_hash_table_lookup(pc->clock_rates, GINT_TO_POINTER(ptype)));
+									if(map_cr && map_cr != clock_rate) {
+										JANUS_LOG(LOG_WARN, "[%"SCNu64"] Payload type %d already mapped to clock rate %d, skipping rtpmap mapping with %d...\n",
+											handle->handle_id, ptype, map_cr, clock_rate);
+									} else {
+										g_hash_table_insert(pc->clock_rates, GINT_TO_POINTER(ptype), GUINT_TO_POINTER(clock_rate));
+										g_hash_table_insert(medium->clock_rates, GINT_TO_POINTER(ptype), GUINT_TO_POINTER(clock_rate));
+										/* Check if opus/red is negotiated */
+										if(strstr(a->value, "red/48000/2"))
+											medium->opusred_pt = ptype;
+									}
 								}
 							}
 						}
@@ -617,6 +710,25 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 					medium->rtcp_ctx[2]->tb = 90000;
 				}
 			}
+			if(m->type == JANUS_SDP_VIDEO && medium->rtx_payload_types && m->ptypes) {
+				/* Check if there are new payload types that conflict with our rtx additions */
+				GList *ptypes = g_list_copy(m->ptypes), *tempP = ptypes;
+				GList *rtx_ptypes = g_hash_table_get_values(medium->rtx_payload_types);
+				while(tempP) {
+					int ptype = GPOINTER_TO_INT(tempP->data);
+					if(g_hash_table_lookup(medium->clock_rates, GINT_TO_POINTER(ptype)) &&
+							g_list_find(rtx_ptypes, GINT_TO_POINTER(ptype))) {
+						/* We have a payload type that is both a codec and rtx, get rid of it */
+						JANUS_LOG(LOG_WARN, "[%"SCNu64"] Removing duplicate payload type %d\n", handle->handle_id, ptype);
+						janus_sdp_remove_payload_type(remote_sdp, medium->mindex, ptype);
+						g_hash_table_remove(pc->clock_rates, GINT_TO_POINTER(ptype));
+						g_hash_table_remove(medium->clock_rates, GINT_TO_POINTER(ptype));
+					}
+					tempP = tempP->next;
+				}
+				g_list_free(ptypes);
+				g_list_free(rtx_ptypes);
+			}
 		}
 		temp = temp->next;
 	}
@@ -668,14 +780,15 @@ int janus_sdp_process_local(void *ice_handle, janus_sdp *remote_sdp, gboolean up
 			else
 				medium = janus_ice_peerconnection_medium_create(handle, JANUS_MEDIA_UNKNOWN);
 		}
-		/* Check if the offer contributed an mid */
+		/* Check if the offer contributed a mid and/or msid */
 		GList *tempA = m->attributes;
+		gboolean have_msid = FALSE;
 		while(tempA) {
 			janus_sdp_attribute *a = (janus_sdp_attribute *)tempA->data;
-			if(a->name) {
+			if(a->name && a->value) {
 				if(!strcasecmp(a->name, "mid")) {
 					/* Found mid attribute */
-					if(strlen(a->value) > 16) {
+					if(strnlen(a->value, 16 + 1) > 16) {
 						JANUS_LOG(LOG_ERR, "[%"SCNu64"] mid on m-line #%d too large: (%zu > 16)\n",
 							handle->handle_id, m->index, strlen(a->value));
 						return -2;
@@ -695,6 +808,49 @@ int janus_sdp_process_local(void *ice_handle, janus_sdp *remote_sdp, gboolean up
 					m->attributes = g_list_remove_link(m->attributes, mid_attr);
 					g_list_free_full(mid_attr, (GDestroyNotify)janus_sdp_attribute_destroy);
 					continue;
+				} else if(!strcasecmp(a->name, "msid")) {
+					/* Found msid attribute */
+					have_msid = TRUE;
+					char msid[65], mstid[65];
+					msid[0] = '\0';
+					mstid[0] = '\0';
+					if(sscanf(a->value, "%64s %64s", msid, mstid) != 2) {
+						JANUS_LOG(LOG_ERR, "[%"SCNu64"] Invalid msid on m-line #%d\n",
+							handle->handle_id, m->index);
+						return -2;
+					}
+					if(medium->msid == NULL || strcasecmp(medium->msid, msid)) {
+						char *old_msid = medium->msid;
+						medium->msid = g_strdup(msid);
+						g_free(old_msid);
+					}
+					if(medium->mstid == NULL || strcasecmp(medium->mstid, mstid)) {
+						char *old_mstid = medium->mstid;
+						medium->mstid = g_strdup(mstid);
+						g_free(old_mstid);
+					}
+					/* Remove this msid attribute, the core will add it again later */
+					GList *msid_attr = tempA;
+					tempA = tempA->next;
+					m->attributes = g_list_remove_link(m->attributes, msid_attr);
+					g_list_free_full(msid_attr, (GDestroyNotify)janus_sdp_attribute_destroy);
+					continue;
+				} else if(!strcasecmp(a->name, "rtpmap")) {
+					if(a->value && strstr(a->value, "rtx") == NULL) {
+						int ptype = atoi(a->value);
+						if(ptype > -1) {
+							char *cr = strchr(a->value, '/');
+							if(cr != NULL) {
+								cr++;
+								uint32_t clock_rate = 0;
+								if(janus_string_to_uint32(cr, &clock_rate) == 0) {
+									if(medium->clock_rates == NULL)
+										medium->clock_rates = g_hash_table_new(NULL, NULL);
+									g_hash_table_insert(medium->clock_rates, GINT_TO_POINTER(ptype), GUINT_TO_POINTER(clock_rate));
+								}
+							}
+						}
+					}
 				}
 			}
 			tempA = tempA->next;
@@ -709,6 +865,12 @@ int janus_sdp_process_local(void *ice_handle, janus_sdp *remote_sdp, gboolean up
 				g_hash_table_insert(pc->media_bymid, g_strdup(medium->mid), medium);
 				janus_refcount_increase(&medium->ref);
 			}
+		}
+		if(!have_msid) {
+			g_free(medium->msid);
+			medium->msid = NULL;
+			g_free(medium->mstid);
+			medium->mstid = NULL;
 		}
 		if(m->direction == JANUS_SDP_INACTIVE) {
 			/* FIXME Reset the local SSRCs and RTCP context */
@@ -1218,7 +1380,6 @@ int janus_sdp_anonymize(janus_sdp *anon) {
 					|| !strcasecmp(a->name, "setup")
 					|| !strcasecmp(a->name, "connection")
 					|| !strcasecmp(a->name, "group")
-					|| !strcasecmp(a->name, "msid")
 					|| !strcasecmp(a->name, "msid-semantic")
 					|| !strcasecmp(a->name, "rid")
 					|| !strcasecmp(a->name, "simulcast")
@@ -1354,7 +1515,7 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 	a = janus_sdp_attribute_create("extmap-allow-mixed", NULL);
 	anon->attributes = g_list_insert_before(anon->attributes, first, a);
 	/* msid-semantic: add new global attribute */
-	a = janus_sdp_attribute_create("msid-semantic", " WMS janus");
+	a = janus_sdp_attribute_create("msid-semantic", " WMS *");
 	anon->attributes = g_list_insert_before(anon->attributes, first, a);
 	/* ICE Full or Lite? */
 	if(janus_ice_is_ice_lite_enabled()) {
@@ -1515,8 +1676,14 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 			m->attributes = g_list_append(m->attributes, a);
 		}
 		if(m->type == JANUS_SDP_AUDIO || m->type == JANUS_SDP_VIDEO) {
-			a = janus_sdp_attribute_create("msid", "janus janus%s", medium->mid);
-			m->attributes = g_list_append(m->attributes, a);
+			if(m->direction != JANUS_SDP_INACTIVE) {
+				if(medium->msid && medium->mstid) {
+					a = janus_sdp_attribute_create("msid", "%s %s", medium->msid, medium->mstid);
+				} else {
+					a = janus_sdp_attribute_create("msid", "janus janus%s", medium->mid);
+				}
+				m->attributes = g_list_append(m->attributes, a);
+			}
 			if(medium->ssrc > 0) {
 				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", medium->ssrc);
 				m->attributes = g_list_append(m->attributes, a);
