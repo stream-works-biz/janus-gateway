@@ -2364,7 +2364,7 @@ static void janus_videoroom_remote_recipient_free(janus_videoroom_remote_recipie
 }
 
 /* Start / stop recording */
-static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps);
+static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps,gint64 now);
 static void janus_videoroom_recorder_close(janus_videoroom_publisher *participant);
 
 /* Freeing stuff */
@@ -6834,9 +6834,12 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 						} else if(participant->recording_active && g_atomic_int_get(&participant->session->started)) {
 							/* We've started recording, send a PLI and go on */
 							GList *temp = participant->streams;
+						
+                            // works	
+							gint64 now = janus_get_real_time();
 							while(temp) {
 								janus_videoroom_publisher_stream *ps = (janus_videoroom_publisher_stream *)temp->data;
-								janus_videoroom_recorder_create(ps);
+								janus_videoroom_recorder_create(ps,now);
 								if(ps->type == JANUS_VIDEOROOM_MEDIA_VIDEO) {
 									/* Send a PLI */
 									janus_videoroom_reqpli(ps, "Recording video");
@@ -8185,9 +8188,12 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 			janus_mutex_lock(&participant->rec_mutex);
 			if((participant->room && participant->room->record) || participant->recording_active) {
 				GList *temp = participant->streams;
+
+                // works
+                gint64 now = janus_get_real_time();
 				while(temp) {
 					janus_videoroom_publisher_stream *ps = (janus_videoroom_publisher_stream *)temp->data;
-					janus_videoroom_recorder_create(ps);
+					janus_videoroom_recorder_create(ps,now);
 					temp = temp->next;
 				}
 				participant->recording_active = TRUE;
@@ -8793,10 +8799,9 @@ void janus_videoroom_slow_link(janus_plugin_session *handle, int mindex, gboolea
 	janus_refcount_decrease(&session->ref);
 }
 
-static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps) {
+static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps,gint64 now) {
 	char filename[255];
 	janus_recorder *rc = NULL;
-	gint64 now = janus_get_real_time();
 	if(ps->publisher && ps->rc == NULL) {
 		janus_videoroom_publisher *participant = ps->publisher;
 		const char *type = NULL;
@@ -10181,7 +10186,7 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(root, "streams", streams);
 
 					//streamworks
-					JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \n",mid, (keyframe && json_is_true(keyframe)) ? "true":"false");
+					JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \(keyframe && json_is_true(keyframe)) ? "true":"false");
 				}
 				/* Validate all the streams we need to configure */
 				janus_mutex_lock(&participant->streams_mutex);
@@ -10413,9 +10418,12 @@ static void *janus_videoroom_handler(void *data) {
 					} else if(participant->recording_active && g_atomic_int_get(&participant->session->started)) {
 						/* We've started recording, send a PLI/FIR and go on */
 						GList *temp = participant->streams;
+
+                        // works
+                        gint64 now = janus_get_real_time();
 						while(temp) {
 							janus_videoroom_publisher_stream *ps = (janus_videoroom_publisher_stream *)temp->data;
-							janus_videoroom_recorder_create(ps);
+							janus_videoroom_recorder_create(ps,now);
 							if(ps->type == JANUS_VIDEOROOM_MEDIA_VIDEO) {
 								/* Send a PLI */
 								janus_videoroom_reqpli(ps, "Recording video");
@@ -12405,9 +12413,12 @@ static void *janus_videoroom_handler(void *data) {
 				janus_mutex_lock(&participant->rec_mutex);
 				if(videoroom->record || participant->recording_active) {
 					GList *temp = participant->streams;
+
+                    // works
+                    gint64 now = janus_get_real_time();
 					while(temp) {
 						janus_videoroom_publisher_stream *ps = (janus_videoroom_publisher_stream *)temp->data;
-						janus_videoroom_recorder_create(ps);
+						janus_videoroom_recorder_create(ps,now);
 						temp = temp->next;
 					}
 					participant->recording_active = TRUE;
