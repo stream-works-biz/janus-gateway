@@ -10186,7 +10186,7 @@ static void *janus_videoroom_handler(void *data) {
 					json_object_set_new(root, "streams", streams);
 
 					//streamworks
-					JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \(keyframe && json_is_true(keyframe)) ? "true":"false");
+					JANUS_LOG(LOG_INFO, "configure mid:%s keyframe:%s \n",mid, (keyframe && json_is_true(keyframe)) ? "true":"false");
 				}
 				/* Validate all the streams we need to configure */
 				janus_mutex_lock(&participant->streams_mutex);
