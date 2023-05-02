@@ -161,10 +161,10 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 		if(a && a->name && a->value) {
 			if(!strcasecmp(a->name, "fingerprint")) {
 				JANUS_LOG(LOG_VERB, "[%"SCNu64"] Fingerprint (global) : %s\n", handle->handle_id, a->value);
-				if(strcasestr(a->value, "sha-256 ") == a->value) {
+				if(!strncasecmp(a->value, "sha-256 ", strlen("sha-256 "))) {
 					rhashing = g_strdup("sha-256");
 					rfingerprint = g_strdup(a->value + strlen("sha-256 "));
-				} else if(strcasestr(a->value, "sha-1 ") == a->value) {
+				} else if(!strncasecmp(a->value, "sha-1 ", strlen("sha-1 "))) {
 					JANUS_LOG(LOG_WARN, "[%"SCNu64"]  Hashing algorithm not the one we expected (sha-1 instead of sha-256), but that's ok\n", handle->handle_id);
 					rhashing = g_strdup("sha-1");
 					rfingerprint = g_strdup(a->value + strlen("sha-1 "));
@@ -310,20 +310,15 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 							handle->handle_id, m->index, strlen(a->value));
 						return -2;
 					}
-					gboolean mid_changed = FALSE;
-					if(medium->mid != NULL && strcasecmp(medium->mid, a->value))
-						mid_changed = TRUE;
-					if(medium->mid == NULL || mid_changed) {
-						char *old_mid = mid_changed ? medium->mid : NULL;
+					if(medium->mid != NULL && strcasecmp(medium->mid, a->value)) {
+						JANUS_LOG(LOG_WARN, "[%"SCNu64"] mid on m-line #%d changed (%s --> %s), ignoring new value\n",
+							handle->handle_id, m->index, medium->mid, a->value);
+					} else if(medium->mid == NULL) {
 						medium->mid = g_strdup(a->value);
 						if(!g_hash_table_lookup(pc->media_bymid, medium->mid)) {
 							g_hash_table_insert(pc->media_bymid, g_strdup(medium->mid), medium);
 							janus_refcount_increase(&medium->ref);
 						}
-						/* If the mid for this m-line changed, get rid of the mapping */
-						if(mid_changed && old_mid != NULL)
-							g_hash_table_remove(pc->media_bymid, old_mid);
-						g_free(old_mid);
 					}
 					if(handle->pc_mid == NULL)
 						handle->pc_mid = g_strdup(a->value);
@@ -349,12 +344,12 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 					}
 				} else if(!strcasecmp(a->name, "fingerprint")) {
 					JANUS_LOG(LOG_VERB, "[%"SCNu64"] Fingerprint (local) : %s\n", handle->handle_id, a->value);
-					if(strcasestr(a->value, "sha-256 ") == a->value) {
+					if(!strncasecmp(a->value, "sha-256 ", strlen("sha-256 "))) {
 						g_free(rhashing);	/* FIXME We're overwriting the global one, if any */
 						rhashing = g_strdup("sha-256");
 						g_free(rfingerprint);	/* FIXME We're overwriting the global one, if any */
 						rfingerprint = g_strdup(a->value + strlen("sha-256 "));
-					} else if(strcasestr(a->value, "sha-1 ") == a->value) {
+					} else if(!strncasecmp(a->value, "sha-1 ", strlen("sha-1 "))) {
 						JANUS_LOG(LOG_WARN, "[%"SCNu64"]  Hashing algorithm not the one we expected (sha-1 instead of sha-256), but that's ok\n", handle->handle_id);
 						g_free(rhashing);	/* FIXME We're overwriting the global one, if any */
 						rhashing = g_strdup("sha-1");
@@ -395,18 +390,10 @@ int janus_sdp_process_remote(void *ice_handle, janus_sdp *remote_sdp, gboolean r
 				/* Missing mandatory information, failure... */
 				JANUS_LOG(LOG_ERR, "[%"SCNu64"] SDP missing mandatory information\n", handle->handle_id);
 				JANUS_LOG(LOG_ERR, "[%"SCNu64"] %p, %p, %p, %p\n", handle->handle_id, ruser, rpass, rfingerprint, rhashing);
-				if(ruser)
-					g_free(ruser);
-				ruser = NULL;
-				if(rpass)
-					g_free(rpass);
-				rpass = NULL;
-				if(rhashing)
-					g_free(rhashing);
-				rhashing = NULL;
-				if(rfingerprint)
-					g_free(rfingerprint);
-				rfingerprint = NULL;
+				g_free(ruser);
+				g_free(rpass);
+				g_free(rhashing);
+				g_free(rfingerprint);
 				return -2;
 			}
 			/* If we received the ICE credentials for the first time, enforce them */
@@ -793,7 +780,10 @@ int janus_sdp_process_local(void *ice_handle, janus_sdp *remote_sdp, gboolean up
 							handle->handle_id, m->index, strlen(a->value));
 						return -2;
 					}
-					if(medium->mid == NULL) {
+					if(medium->mid != NULL && strcasecmp(medium->mid, a->value)) {
+						JANUS_LOG(LOG_WARN, "[%"SCNu64"] mid on m-line #%d changed (%s --> %s), ignoring new value\n",
+							handle->handle_id, m->index, medium->mid, a->value);
+					} else if(medium->mid == NULL) {
 						medium->mid = g_strdup(a->value);
 						if(!g_hash_table_lookup(pc->media_bymid, medium->mid)) {
 							g_hash_table_insert(pc->media_bymid, g_strdup(medium->mid), medium);
@@ -1549,6 +1539,11 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 		g_free(m->c_addr);
 		m->c_ipv4 = ipv4;
 		m->c_addr = g_strdup(janus_get_public_ip(0));
+		/* a=mid */
+		if(medium->mid) {
+			a = janus_sdp_attribute_create("mid", "%s", medium->mid);
+			m->attributes = g_list_insert_before(m->attributes, first, a);
+		}
 		/* Check if we need to refuse the media or not */
 		if(m->type == JANUS_SDP_AUDIO || m->type == JANUS_SDP_VIDEO) {
 			/* Audio/Video */
@@ -1633,11 +1628,6 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 			temp = temp->next;
 			continue;
 		}
-		/* a=mid */
-		if(medium->mid) {
-			a = janus_sdp_attribute_create("mid", "%s", medium->mid);
-			m->attributes = g_list_insert_before(m->attributes, first, a);
-		}
 		if(m->type == JANUS_SDP_APPLICATION) {
 			if(!strcasecmp(m->proto, "UDP/DTLS/SCTP"))
 				janus_flags_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_NEW_DATACHAN_SDP);
@@ -1688,7 +1678,8 @@ char *janus_sdp_merge(void *ice_handle, janus_sdp *anon, gboolean offer) {
 				a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", medium->ssrc);
 				m->attributes = g_list_append(m->attributes, a);
 				if(medium->ssrc_rtx > 0 && m->type == JANUS_SDP_VIDEO &&
-						janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX)) {
+						janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_RFC4588_RTX) &&
+						(m->direction == JANUS_SDP_DEFAULT || m->direction == JANUS_SDP_SENDRECV || m->direction == JANUS_SDP_SENDONLY)) {
 					/* Add rtx SSRC group to negotiate the RFC4588 stuff */
 					a = janus_sdp_attribute_create("ssrc", "%"SCNu32" cname:janus", medium->ssrc_rtx);
 					m->attributes = g_list_append(m->attributes, a);
