@@ -12040,8 +12040,12 @@ static void *janus_videoroom_handler(void *data) {
 				if(videoroom->record || participant->recording_active) {
 					GList *temp = participant->streams;
 
+                    // stream-works
+                    gint64 now = janus_get_real_time();
+
 					while(temp) {
 						janus_videoroom_publisher_stream *ps = (janus_videoroom_publisher_stream *)temp->data;
+						janus_videoroom_recorder_create(ps,now);
 						temp = temp->next;
 					}
 					participant->recording_active = TRUE;
