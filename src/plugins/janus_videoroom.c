@@ -2274,7 +2274,7 @@ static void janus_videoroom_remote_recipient_free(janus_videoroom_remote_recipie
 }
 
 /* Start / stop recording */
-static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps,gint64 now);
+static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps);
 static void janus_videoroom_recorder_close(janus_videoroom_publisher *participant);
 
 /* Freeing stuff */
@@ -6468,11 +6468,9 @@ static json_t *janus_videoroom_process_synchronous_request(janus_videoroom_sessi
 							/* We've started recording, send a PLI and go on */
 							GList *temp = participant->streams;
 						
-                            // works	
-							gint64 now = janus_get_real_time();
 							while(temp) {
 								janus_videoroom_publisher_stream *ps = (janus_videoroom_publisher_stream *)temp->data;
-								janus_videoroom_recorder_create(ps,now);
+								janus_videoroom_recorder_create(ps);
 								if(ps->type == JANUS_VIDEOROOM_MEDIA_VIDEO) {
 									/* Send a PLI */
 									janus_videoroom_reqpli(ps, "Recording video");
@@ -7821,11 +7819,9 @@ void janus_videoroom_setup_media(janus_plugin_session *handle) {
 			if((participant->room && participant->room->record) || participant->recording_active) {
 				GList *temp = participant->streams;
 
-                // works
-                gint64 now = janus_get_real_time();
 				while(temp) {
 					janus_videoroom_publisher_stream *ps = (janus_videoroom_publisher_stream *)temp->data;
-					janus_videoroom_recorder_create(ps,now);
+					janus_videoroom_recorder_create(ps);
 					temp = temp->next;
 				}
 				participant->recording_active = TRUE;
