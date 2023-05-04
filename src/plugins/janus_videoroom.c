@@ -8343,6 +8343,7 @@ void janus_videoroom_slow_link(janus_plugin_session *handle, int mindex, gboolea
 	janus_refcount_decrease(&session->ref);
 }
 
+static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps) {
 	char filename[255];
 	janus_recorder *rc = NULL;
 		janus_videoroom_publisher *participant = ps->publisher;
