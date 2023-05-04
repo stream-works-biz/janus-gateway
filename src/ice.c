@@ -2044,7 +2044,7 @@ static void janus_ice_cb_candidate_gathering_done(NiceAgent *agent, guint stream
 	janus_ice_handle *handle = (janus_ice_handle *)user_data;
 	if(!handle)
 		return;
-	JANUS_LOG(LOG_VERB, "[%"SCNu64"] Gathering done for stream %d\n", handle->handle_id, stream_id);
+	JANUS_LOG(LOG_INFO, "[%"SCNu64"] Gathering done for stream %d\n", handle->handle_id, stream_id);
 	handle->cdone++;
 	janus_ice_peerconnection *pc = handle->pc;
 	if(!pc || pc->stream_id != stream_id) {
