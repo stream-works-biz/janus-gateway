@@ -8346,58 +8346,57 @@ void janus_videoroom_slow_link(janus_plugin_session *handle, int mindex, gboolea
 static void janus_videoroom_recorder_create(janus_videoroom_publisher_stream *ps,gint64 now){
 	char filename[255];
 	janus_recorder *rc = NULL;
-		janus_videoroom_publisher *participant = ps->publisher;
-		const char *type = NULL;
-		switch(ps->type) {
-			case JANUS_VIDEOROOM_MEDIA_AUDIO:
-				type = janus_audiocodec_name(ps->acodec);
-				break;
-			case JANUS_VIDEOROOM_MEDIA_VIDEO:
-				type = janus_videocodec_name(ps->vcodec);
-				break;
-			case JANUS_VIDEOROOM_MEDIA_DATA:
-				type = "text";
-				break;
-			default:
-				return;
-		}
-		janus_rtp_switching_context_reset(&ps->rec_ctx);
-		janus_rtp_simulcasting_context_reset(&ps->rec_simctx);
-		ps->rec_simctx.substream_target = 2;
-		ps->rec_simctx.templayer_target = 2;
-		memset(filename, 0, 255);
-		if(participant->recording_base) {
-			/* Use the filename and path we have been provided */
-			g_snprintf(filename, 255, "%s-%s-%d", participant->recording_base,
-				janus_videoroom_media_str(ps->type), ps->mindex);
-			rc = janus_recorder_create_full(participant->room->rec_dir, type, ps->fmtp, filename);
-			if(rc == NULL) {
-				JANUS_LOG(LOG_ERR, "Couldn't open a %s recording file for this publisher!\n",
-					janus_videoroom_media_str(ps->type));
-			}
-		} else {
-			/* Build a filename */
-			// stream-works added timestamp to file name
-			g_snprintf(filename, 255, "videoroom-%s-user-%s-%"SCNi64"-%s-%d",
-				participant->room_id_str, participant->user_id_str, now,
-				janus_videoroom_media_str(ps->type), ps->mindex);
-			rc = janus_recorder_create_full(participant->room->rec_dir, type, ps->fmtp, filename);
-			if(rc == NULL) {
-				JANUS_LOG(LOG_ERR, "Couldn't open an %s recording file for this publisher!\n",
-					janus_videoroom_media_str(ps->type));
-			}
-		}
-		/* If the stream has a description, store it in the recording */
-		if(ps->description)
-			janus_recorder_description(rc, ps->description);
-		/* If the video-orientation extension has been negotiated, mark it in the recording */
-		if(ps->video_orient_extmap_id > 0)
-			janus_recorder_add_extmap(rc, ps->video_orient_extmap_id, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION);
-		/* If media is encrypted, mark it in the recording */
-		if(ps->type != JANUS_VIDEOROOM_MEDIA_DATA && participant->e2ee)
-			janus_recorder_encrypted(rc);
-		ps->rc = rc;
+	janus_videoroom_publisher *participant = ps->publisher;
+	const char *type = NULL;
+	switch(ps->type) {
+		case JANUS_VIDEOROOM_MEDIA_AUDIO:
+			type = janus_audiocodec_name(ps->acodec);
+			break;
+		case JANUS_VIDEOROOM_MEDIA_VIDEO:
+			type = janus_videocodec_name(ps->vcodec);
+			break;
+		case JANUS_VIDEOROOM_MEDIA_DATA:
+			type = "text";
+			break;
+		default:
+			return;
 	}
+	janus_rtp_switching_context_reset(&ps->rec_ctx);
+	janus_rtp_simulcasting_context_reset(&ps->rec_simctx);
+	ps->rec_simctx.substream_target = 2;
+	ps->rec_simctx.templayer_target = 2;
+	memset(filename, 0, 255);
+	if(participant->recording_base) {
+		/* Use the filename and path we have been provided */
+		g_snprintf(filename, 255, "%s-%s-%d", participant->recording_base,
+			janus_videoroom_media_str(ps->type), ps->mindex);
+		rc = janus_recorder_create_full(participant->room->rec_dir, type, ps->fmtp, filename);
+		if(rc == NULL) {
+			JANUS_LOG(LOG_ERR, "Couldn't open a %s recording file for this publisher!\n",
+				janus_videoroom_media_str(ps->type));
+		}
+	} else {
+		/* Build a filename */
+		// stream-works added timestamp to file name
+		g_snprintf(filename, 255, "videoroom-%s-user-%s-%"SCNi64"-%s-%d",
+			participant->room_id_str, participant->user_id_str, now,
+			janus_videoroom_media_str(ps->type), ps->mindex);
+		rc = janus_recorder_create_full(participant->room->rec_dir, type, ps->fmtp, filename);
+		if(rc == NULL) {
+			JANUS_LOG(LOG_ERR, "Couldn't open an %s recording file for this publisher!\n",
+				janus_videoroom_media_str(ps->type));
+		}
+	}
+	/* If the stream has a description, store it in the recording */
+	if(ps->description)
+		janus_recorder_description(rc, ps->description);
+	/* If the video-orientation extension has been negotiated, mark it in the recording */
+	if(ps->video_orient_extmap_id > 0)
+		janus_recorder_add_extmap(rc, ps->video_orient_extmap_id, JANUS_RTP_EXTMAP_VIDEO_ORIENTATION);
+	/* If media is encrypted, mark it in the recording */
+	if(ps->type != JANUS_VIDEOROOM_MEDIA_DATA && participant->e2ee)
+		janus_recorder_encrypted(rc);
+	ps->rc = rc;
 }
 
 static void janus_videoroom_recorder_close(janus_videoroom_publisher *participant) {
