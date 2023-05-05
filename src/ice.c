@@ -4567,7 +4567,7 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 	}
 	if(!pc->cdone) {
 		if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT) && !pc->noerrorlog) {
-			JANUS_LOG(LOG_ERR, "[%"SCNu64"] No candidates not gathered yet for stream??\n", handle->handle_id);
+			JANUS_LOG(LOG_ERR, "[%"SCNu64"] No candidates not gathered yet for stream?? data:%s label:%s \n", handle->handle_id,pkt->data,pkt->label);
 			pc->noerrorlog = TRUE;	/* Don't flood with the same error all over again */
 		}
 		janus_ice_free_queued_packet(pkt);
