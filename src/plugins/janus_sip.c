@@ -1693,6 +1693,11 @@ static void janus_sip_sofia_logger(void *stream, char const *fmt, va_list ap) {
 		return;
 	}
 	if(append) {
+		// stream-works
+		if (strstr(sofia_log, "SIP/2.0 100 Trying") != sofia_log){
+			return
+		}
+
 		/* We're copying a message in our buffer: check if this is the end */
 		if(line[3] == '-') {
 			if(!started) {
@@ -1742,10 +1747,7 @@ static void janus_sip_sofia_logger(void *stream, char const *fmt, va_list ap) {
 					gateway->notify_event(&janus_sip_plugin, session->handle, info);
 					janus_refcount_decrease(&session->ref);
 				} else {
-					// stream-works
-					if (strstr(sofia_log, "SIP/2.0 100 Trying") != sofia_log){
-						JANUS_LOG(LOG_WARN, "Couldn't find a session associated to this message, dropping it...\n%s", sofia_log);
-					}
+					JANUS_LOG(LOG_WARN, "Couldn't find a session associated to this message, dropping it...\n%s", sofia_log);
 				}
 				/* Done, reset the buffers */
 				sofia_log[0] = '\0';
