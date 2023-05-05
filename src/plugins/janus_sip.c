@@ -1695,7 +1695,7 @@ static void janus_sip_sofia_logger(void *stream, char const *fmt, va_list ap) {
 	if(append) {
 		// stream-works
 		if (strstr(sofia_log, "SIP/2.0 100 Trying") != sofia_log){
-			return
+			return;
 		}
 
 		/* We're copying a message in our buffer: check if this is the end */
