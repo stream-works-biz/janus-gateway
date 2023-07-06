@@ -2003,8 +2003,8 @@ static gboolean janus_ice_check_failed(gpointer data) {
 	}
 	/* Still in the failed state, how much time passed since we first detected it? */
 
-	/* stream-works
-	/* Let's wait a little longer */
+	/* stream-works */
+	/* Let's wait a little longer
 	if(janus_get_monotonic_time() - pc->icefailed_detected < 5*G_USEC_PER_SEC) {
 		return TRUE;
 	}
