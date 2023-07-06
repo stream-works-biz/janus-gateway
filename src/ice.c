@@ -2002,10 +2002,14 @@ static gboolean janus_ice_check_failed(gpointer data) {
 		goto stoptimer;
 	}
 	/* Still in the failed state, how much time passed since we first detected it? */
+
+	/* stream-works
 	if(janus_get_monotonic_time() - pc->icefailed_detected < 5*G_USEC_PER_SEC) {
 		/* Let's wait a little longer */
 		return TRUE;
 	}
+	*/
+
 	/* If we got here it means the timer expired, and we should check if this is a failure */
 	gboolean trickle_recv = (!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_TRICKLE) || janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALL_TRICKLES));
 	gboolean answer_recv = janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_GOT_ANSWER);
