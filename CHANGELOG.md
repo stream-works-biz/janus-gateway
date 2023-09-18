@@ -3,6 +3,42 @@
 All notable changes to this project will be documented in this file.
 
 
+## [v1.2.0] - 2023-08-09
+
+- Added support for VP9/AV1 simulcast, and fixed broken AV1/SVC support [[PR-3218](https://github.com/meetecho/janus-gateway/pull/3218)]
+- Fixed RTCP out quality stats [[PR-3228](https://github.com/meetecho/janus-gateway/pull/3228)]
+- Default link quality stats to 100
+- Added support for ICE consent freshness [[PR-3234](https://github.com/meetecho/janus-gateway/pull/3234)]
+- Fixed rare race condition in VideoRoom [[PR-3219](https://github.com/meetecho/janus-gateway/pull/3219)] [[PR-3247](https://github.com/meetecho/janus-gateway/pull/3247)]
+- Use speexdsp's jitter buffer in the AudioBridge [[PR-3233](https://github.com/meetecho/janus-gateway/pull/3233)]
+- Fixed crash in Streaming plugin on mountpoints with too many streams [[Issue-3225](https://github.com/meetecho/janus-gateway/pull/3225)]
+- Support for batched configure requests in Streaming plugin (thanks @petarminchev!) [[PR-3239](https://github.com/meetecho/janus-gateway/pull/3239)]
+- Fixed rare deadlock in Streamin plugin [[PR-3250](https://github.com/meetecho/janus-gateway/pull/3250)]
+- Fix simulated leave message for longer string ID rooms in TextRoom (thanks @adnanel!) [PR-3243](https://github.com/meetecho/janus-gateway/pull/3243)]
+- Notify about count of sessions, handles and PeerConnections on a regular basis, when event handlers are enabled [[PR-3221](https://github.com/meetecho/janus-gateway/pull/3221)]
+- Fixed broken Insertable Streams for recvonly streams when answering in janus.js
+- Added background selector and blur support to Virtual Background demo
+- Other smaller fixes and improvements (thanks to all who contributed pull requests and reported issues!)
+
+## [v1.1.4] - 2023-05-19
+
+- Moved discussions from Google Group to Discourse
+- Fixed typo in command line argument validation
+- Refactored RTP forwarder internals as a core feature [[PR-3155](https://github.com/meetecho/janus-gateway/pull/3155)]
+- Refactored SVC processing as a core feature, and removed deprecated VP9/SVC demo [[PR-3174](https://github.com/meetecho/janus-gateway/pull/3174)]
+- Don't create IPv6 sockets if IPv6 is completely disabled [[PR-3179](https://github.com/meetecho/janus-gateway/pull/3179)]
+- Fixed some VideoRoom race conditions [[PR-3167](https://github.com/meetecho/janus-gateway/pull/3167)]
+- Added simulcast/SVC params to switch in VideoRoom (thanks @brave44!) [[PR-3197](https://github.com/meetecho/janus-gateway/pull/3197)]
+- Add support for receiving offers in Streaming plugin (for WHEP) [[PR-3199](https://github.com/meetecho/janus-gateway/pull/3199)]
+- Add newline for SIP headers that are overflown in length (thanks @zayim!) [[PR-3184](https://github.com/meetecho/janus-gateway/pull/3184)]
+- Save SIP reason state on multiple callbacks (thanks @kenangenjac!) [[PR-3210](https://github.com/meetecho/janus-gateway/pull/3210)]
+- Avoid parsing whitespace as invalid JSON when receiving WebSocket messages (thanks @htrendev!) [[PR-3208](https://github.com/meetecho/janus-gateway/pull/3208)]
+- Remove old tracks before adding/replacing new ones in janus.js [[PR-3203](https://github.com/meetecho/janus-gateway/pull/3203)]
+- Tweaks to some janus.js internals (thanks @i8-pi!) [[PR-3211](https://github.com/meetecho/janus-gateway/pull/3211)]
+- Fixed some typos and added some tweaks to Admin API demo
+- Refactored npm version of janus.js
+- Other smaller fixes and improvements (thanks to all who contributed pull requests and reported issues!)
+
 ## [v1.1.3] - 2023-03-06
 
 - Use getaddrinfo instead of gethostbyname [[PR-3159](https://github.com/meetecho/janus-gateway/pull/3159)]

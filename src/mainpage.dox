@@ -101,7 +101,7 @@
  * - \b libsrtp: https://github.com/cisco/libsrtp (SRTP, at least v2.x suggested)
  * - \b usrsctp: https://github.com/sctplab/usrsctp (\c optional, Data Channels)
  * - \b libmicrohttpd: http://www.gnu.org/software/libmicrohttpd/ (\c optional, v0.9.59, Web server)
- * - \b libwebsockets: https://libwebsockets.org/ (\c optional, WebSockets)
+ * - \b libwebsockets: https://libwebsockets.org/ (\c optional, at least v4.x suggested, WebSockets)
  * - \b rabbitmq-c: https://github.com/alanxz/rabbitmq-c (\c optional, v1.0.4, RabbitMQ)
  * - \b paho.mqtt.c: https://eclipse.org/paho/clients/c (\c optional, v1.1.0 for MQTT v3.1 & v3.1.1 or v1.3.0 for MQTT v5)
  * - \b nanomsg: https://nanomsg.org/ (\c optional, Nanomsg)
@@ -3876,7 +3876,7 @@ ldd janus | grep asan
  * - \b libsrtp: https://github.com/cisco/libsrtp (SRTP, at least v2.x suggested)
  * - \b usrsctp: https://github.com/sctplab/usrsctp (\c optional, Data Channels)
  * - \b libmicrohttpd: http://www.gnu.org/software/libmicrohttpd/ (\c optional, Web server, at least v0.9.59)
- * - \b libwebsockets: https://libwebsockets.org/ (\c optional, WebSockets)
+ * - \b libwebsockets: https://libwebsockets.org/ (\c optional, at least v4.x suggested, WebSockets)
  * - \b rabbitmq-c: https://github.com/alanxz/rabbitmq-c (\c optional, v1.0.4, RabbitMQ)
  * - \b paho.mqtt.c: https://eclipse.org/paho/clients/c (\c optional, v1.1.0 for MQTT v3.1 & v3.1.1 or v1.3.0 for MQTT v5)
  * - \b nanomsg: https://nanomsg.org/ (\c optional, Nanomsg)
@@ -4067,7 +4067,10 @@ ldd janus | grep asan
  *    - Presentation on Janode, the official Janus nodejs SDK, at <a href="https://2021.commcon.xyz/talks/janode-the-janus-node-js-sdk">CommCon 2021</a>;
  *    - Presentation on WebRTC broadcasting with WHIP and how to scale at <a href="https://fosdem.org/2022/schedule/event/rtc_whip/">FOSDEM 2022</a>;
  *    - Presentation on SIP call transfers and multiple calls at <a href="https://youtu.be/vSFZe8SsTbM?t=6379">OpenSIPS 2022</a>;
- *    - Presentation on SFU/VideoRoom cascading at <a href="https://www.youtube.com/watch?v=z7SvEQcDEgM">IIT RTC 2022</a>. \n\n
+ *    - Presentation on SFU/VideoRoom cascading at <a href="https://www.youtube.com/watch?v=z7SvEQcDEgM">IIT RTC 2022</a>;
+ *    - Presentation on Social audio applications with Janus at <a href="https://fosdem.org/2023/schedule/event/janus/">FOSDEM 2023</a>;
+ *    - Presentation on Real-Time Text in SIP and WebRTC at <a href="https://www.youtube.com/watch?v=yehYE34d3mI&t=10957s">Kamailio World 2023</a>;
+ *    - Presentation on Hybrid meetings using Janus at <a href="https://www.youtube.com/watch?v=ZqRvUxgf00s">CommCon 2023</a>. \n\n
  *    Apart from these presentations, make sure you also check the slides
  *    and presentations from <a href="https://januscon.it/2019">JanusCon</a>,
  *    the Janus conference we hosted here in Napoli.
