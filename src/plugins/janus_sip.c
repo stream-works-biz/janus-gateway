@@ -4148,10 +4148,10 @@ static void *janus_sip_handler(void *data) {
 			session->media.update = offer;
 			JANUS_LOG(LOG_VERB, "Prepared SDP for update:\n%s", sdp);
 
-			gboolean add_contact_header = (session->stack->contact_header != NULL);
-
 			if(session->status == janus_sip_call_status_incall) {
 				/* We're sending a re-INVITE ourselves */
+				/* stream-works(added contact header for kamailio) */
+				gboolean add_contact_header = (session->stack->contact_header != NULL);
 				nua_invite(session->stack->s_nh_i,
 					TAG_IF(add_contact_header, SIPTAG_CONTACT_STR(session->stack->contact_header)),
 					SOATAG_USER_SDP_STR(sdp),
