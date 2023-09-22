@@ -10010,7 +10010,13 @@ static void *janus_streaming_relay_thread(void *data) {
 	json_t *result = json_object();
 	json_object_set_new(result, "status", json_string("stopped"));
 	json_object_set_new(event, "result", result);
-	while(viewer) {
+
+	/* stream-works added loop guard */
+	int failsafe = 0;
+
+	while(viewer && failsafe < 300) {
+		failsafe++;
+
 		janus_streaming_session *session = (janus_streaming_session *)viewer->data;
 		if(session == NULL) {
 			mountpoint->viewers = g_list_remove_all(mountpoint->viewers, session);
@@ -10049,8 +10055,12 @@ static void *janus_streaming_relay_thread(void *data) {
 			l = l->next;
 		}
 	}
-
-	JANUS_LOG(LOG_VERB, "[%s] Leaving streaming relay thread\n", name);
+	if (failsafe >= 300){
+		JANUS_LOG(LOG_ERR, "[%s] Leaving streaming relay thread failsafe:%d detection loop\n", name,failsafe);
+	}else{
+		JANUS_LOG(LOG_VERB, "[%s] Leaving streaming relay thread failsafe:%d \n", name,failsafe);
+	}
+	
 	g_free(name);
 	janus_refcount_decrease(&mountpoint->ref);
 	return NULL;
