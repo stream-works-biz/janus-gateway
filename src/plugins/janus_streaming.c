@@ -3521,7 +3521,7 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 						json_t *vsvc = json_object_get(m, "svc");
 						dosvc = vsvc ? json_is_true(vsvc) : FALSE;
 
-						// streamwors
+						// streamworks
 						json_t *extension_id = json_object_get(m, "video_orientation_extension_id");
 						video_orientation_extension_id = json_integer_value(extension_id);
 
@@ -4884,6 +4884,7 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 			g_snprintf(error_cause, 512, "No such mountpoint/stream %s", id_value_str);
 			goto prepare_response;
 		}
+
 		janus_refcount_increase(&mp->ref);
 		/* A secret may be required for this action */
 		JANUS_CHECK_SECRET(mp->secret, root, "secret", error_code, error_cause,
@@ -4893,20 +4894,34 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 			janus_mutex_unlock(&mountpoints_mutex);
 			goto prepare_response;
 		}
+
 		JANUS_LOG(LOG_VERB, "Request to unmount mountpoint/stream %s\n", id_value_str);
+
 		/* Remove mountpoint from the hashtable: this will get it destroyed eventually */
 		g_hash_table_remove(mountpoints,
 			string_ids ? (gpointer)id_value_str : (gpointer)&id_value);
+
 		/* FIXME Should we kick the current viewers as well? */
 		janus_mutex_lock(&mp->mutex);
 		GList *viewer = g_list_first(mp->viewers);
+
 		/* Prepare JSON event */
 		json_t *event = json_object();
 		json_object_set_new(event, "streaming", json_string("event"));
 		json_t *result = json_object();
 		json_object_set_new(result, "status", json_string("stopped"));
 		json_object_set_new(event, "result", result);
-		while(viewer) {
+
+
+		/* streamworks added loop guard */
+		int failsafe = 0;
+
+		while(viewer && failsafe < 1000) {
+			failsafe++;
+			if (failsafe == 1000){
+				JANUS_LOG(LOG_ERR, "Request to unmount mountpoint/stream overloop:%d\n", failsafe);
+			}
+
 			janus_streaming_session *s = (janus_streaming_session *)viewer->data;
 			if(s == NULL) {
 				mp->viewers = g_list_remove_all(mp->viewers, s);
@@ -4979,6 +4994,9 @@ static json_t *janus_streaming_process_synchronous_request(janus_streaming_sessi
 		response = json_object();
 		json_object_set_new(response, "streaming", json_string("destroyed"));
 		json_object_set_new(response, "destroyed", string_ids ? json_string(id_value_str) : json_integer(id_value));
+
+		JANUS_LOG(LOG_VERB, "Request to unmount mountpoint/stream %s complete\n", id_value_str);
+
 		goto prepare_response;
 	} else if(!strcasecmp(request_text, "recording")) {
 		/* We can start/stop recording a live, RTP-based stream */
@@ -5815,6 +5833,7 @@ static void *janus_streaming_handler(void *data) {
 				janus_mutex_unlock(&sessions_mutex);
 				goto error;
 			}
+
 			json_t *id = json_object_get(root, "id");
 			guint64 id_value = 0;
 			char id_num[30], *id_value_str = NULL;
@@ -10032,10 +10051,10 @@ static void *janus_streaming_relay_thread(void *data) {
 	json_object_set_new(result, "status", json_string("stopped"));
 	json_object_set_new(event, "result", result);
 
-	/* stream-works added loop guard */
+	/* streamworks added loop guard */
 	int failsafe = 0;
 
-	while(viewer && failsafe < 300) {
+	while(viewer && failsafe < 1000) {
 		failsafe++;
 
 		janus_streaming_session *session = (janus_streaming_session *)viewer->data;
@@ -10076,7 +10095,7 @@ static void *janus_streaming_relay_thread(void *data) {
 			l = l->next;
 		}
 	}
-	if (failsafe >= 300){
+	if (failsafe >= 1000){
 		JANUS_LOG(LOG_ERR, "[%s] Leaving streaming relay thread failsafe:%d detection loop\n", name,failsafe);
 	}else{
 		JANUS_LOG(LOG_VERB, "[%s] Leaving streaming relay thread failsafe:%d \n", name,failsafe);
