@@ -5891,7 +5891,20 @@ static void *janus_streaming_handler(void *data) {
 			}
 			janus_mutex_lock(&mp->mutex);
 			janus_mutex_lock(&session->mutex);
+
 			janus_mutex_unlock(&mountpoints_mutex);
+
+			// streamworks
+			if(g_atomic_int_get(&session->stopping)) {
+				JANUS_LOG(LOG_INFO, "[%s] Streming session watch already stopping\n", id_value_str);
+				janus_mutex_unlock(&session->mutex);
+				janus_mutex_unlock(&mp->mutex);
+				janus_mutex_unlock(&sessions_mutex);
+				janus_refcount_decrease(&mp->ref);
+				error_code = JANUS_STREAMING_ERROR_INVALID_REQUEST;
+				goto error;
+			}
+
 			/* Check if this is a new viewer, or if an update is taking place (i.e., ICE restart) */
 			gboolean audio = TRUE, video = TRUE, data = TRUE;
 			if(do_restart) {
@@ -6392,6 +6405,19 @@ done:
 				janus_sdp_destroy(parsed_sdp);
 				goto error;
 			}
+
+			// streamworks
+			if(g_atomic_int_get(&session->stopping)) {
+				JANUS_LOG(LOG_INFO, "[%s] Streming session watch with sdp already stopping\n", session->mountpoint->id_str);
+				janus_mutex_unlock(&session->mutex);
+				janus_mutex_unlock(&mp->mutex);
+				janus_mutex_unlock(&sessions_mutex);
+				janus_refcount_decrease(&mp->ref);
+				janus_sdp_destroy(parsed_sdp);
+				error_code = JANUS_STREAMING_ERROR_INVALID_REQUEST;
+				goto error;
+			}
+
 			if(g_list_find(mp->viewers, session) != NULL) {
 				janus_mutex_unlock(&session->mutex);
 				janus_mutex_unlock(&mp->mutex);
@@ -6961,6 +6987,17 @@ done:
 			} else {
 				id_value_str = (char *)json_string_value(id);
 			}
+
+			// streamworks
+			if(g_atomic_int_get(&session->stopping)) {
+				JANUS_LOG(LOG_INFO, "[%s] Streming session switch already stopping\n", id_value_str);
+				janus_mutex_unlock(&mountpoints_mutex);
+				janus_mutex_unlock(&session->mutex);
+				janus_mutex_unlock(&sessions_mutex);
+				error_code = JANUS_STREAMING_ERROR_INVALID_REQUEST;
+				goto error;
+			}
+
 			janus_mutex_lock(&mountpoints_mutex);
 			janus_streaming_mountpoint *mp = g_hash_table_lookup(mountpoints,
 				string_ids ? (gpointer)id_value_str : (gpointer)&id_value);
