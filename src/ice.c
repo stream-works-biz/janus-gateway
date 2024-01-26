@@ -859,7 +859,7 @@ static void janus_ice_notify_trickle(janus_ice_handle *handle, char *buffer) {
 	json_object_set_new(event, "candidate", candidate);
 	/* Send the event */
 	JANUS_LOG(LOG_INFO, "[%"SCNu64"] Sending trickle event (%s) to transport...\n",
-		handle->handle_id, buffer ? "candidate" : "end-of-candidates");
+		handle->handle_id, buffer ? cbuffer : "end-of-candidates");
 	janus_session_notify_event(session, event);
 }
 
