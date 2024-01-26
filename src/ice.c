@@ -840,7 +840,7 @@ static void janus_ice_notify_trickle(janus_ice_handle *handle, char *buffer) {
 	/* stream-works */
 	if(buffer != NULL){
 		g_snprintf(cbuffer, sizeof(cbuffer), "candidate:%s", buffer);
-		if (strcmp(cbuffer,"candidate:") == 0{
+		if (strcmp(cbuffer,"candidate:") == 0){
 			JANUS_LOG(LOG_INFO, "[%"SCNu64"] Sending trickle event (%s) to transport...\n",
 				handle->handle_id, "no body candidate");
 			return;
