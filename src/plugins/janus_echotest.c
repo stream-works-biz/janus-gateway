@@ -879,7 +879,10 @@ static void janus_echotest_hangup_media_internal(janus_plugin_session *handle) {
 	json_object_set_new(event, "echotest", json_string("event"));
 	json_object_set_new(event, "result", json_string("done"));
 	int ret = gateway->push_event(handle, &janus_echotest_plugin, NULL, event, NULL);
-	JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
+
+	// stream-works always -2 (not available plugin)
+	// JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
+
 	json_decref(event);
 	/* Get rid of the recorders, if available */
 	janus_mutex_lock(&session->rec_mutex);
