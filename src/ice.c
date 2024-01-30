@@ -4546,7 +4546,11 @@ static gboolean janus_ice_outgoing_traffic_handle(janus_ice_handle *handle, janu
 		GSList *candidates = NULL;
 		NiceCandidate *c = NULL;
 		while((c = g_async_queue_try_pop(handle->queued_candidates)) != NULL) {
-			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Processing candidate %p\n", handle->handle_id, c);
+			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Processing candidate %p\n type:%u", handle->handle_id, c,c->type);
+			// stream-works
+			if (c->type == NiceCandidateType.NICE_CANDIDATE_TYPE_PEER_REFLEXIVE){
+				continue;
+			}
 			candidates = g_slist_append(candidates, c);
 		}
 		guint count = g_slist_length(candidates);
