@@ -1,0 +1,61 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/lib64/glib-2.0/include/**",
+                "/usr/include/glib-2.0/**",
+                "/usr/include/nice/**",
+                "/usr/include/sys/**",
+                "/usr/local/src/libsrtp-2.5.0/"
+            ],
+            "defines": [
+                "CONFDIR=\"\"",
+                "EVENTDIR=\"\"",
+                "LOGGERDIR=\"\"",
+                "PLUGINDIR=\"\"",
+                "TRANSPORTDIR=\"\"",
+                "STDC_HEADERS=1",
+                "HAVE_SYS_TYPES_H=1",
+                "HAVE_SYS_STAT_H=1",
+                "HAVE_STDLIB_H=1",
+                "HAVE_STRING_H=1",
+                "HAVE_MEMORY_H=1",
+                "HAVE_STRINGS_H=1",
+                "HAVE_INTTYPES_H=1",
+                "HAVE_STDINT_H=1",
+                "HAVE_UNISTD_H=1",
+                "__EXTENSIONS__=1",
+                "_ALL_SOURCE=1",
+                "_GNU_SOURCE=1",
+                "_POSIX_PTHREAD_SEMANTICS=1",
+                "_TANDEM_SOURCE=1",
+                "HAVE_DLFCN_H=1",
+                "HAS_DTLS_WINDOW_SIZE=1",
+                "HAVE_SRTP_AESGCM=1",
+                "HAVE_PORTRANGE=1",
+                "HAVE_LIBNICE_TCP=1",
+                "HAVE_CLOSE_ASYNC=1",
+                "HAVE_ICE_NOMINATION=1",
+                "HAVE_CONSENT_FRESHNESS=1",
+                "HAVE_SRTP_2=1",
+                "HAVE_SCTP=1",
+                "HAVE_LIBCURL=1",
+                "HAVE_TURNRESTAPI=1",
+                "HAVE_SAMPLEEVH=1",
+                "HAVE_ENUM_MHD_RESULT=1",
+                "HAVE_WEBSOCKETS=1",
+                "HAVE_LIBWEBSOCKETS_PEER_SIMPLE=1",
+                "HAVE_WSEVH=1",
+                "HAVE_PFUNIX=1",
+                "HAVE_LIBOGG=1 HAVE_LIBPCAP=1"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

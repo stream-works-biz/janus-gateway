@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "janus.h": "c",
+        "mutex.h": "c",
+        "ice.h": "c",
+        "sdp.h": "c",
+        "dtls.h": "c",
+        "rtpsrtp.h": "c"
+    }
+}

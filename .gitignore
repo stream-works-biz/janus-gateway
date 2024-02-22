@@ -66,5 +66,4 @@ npm/src
 # CLion
 .idea
 
-.vscode
 node_modules
