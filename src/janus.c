@@ -1252,6 +1252,7 @@ int janus_process_incoming_request(janus_request *request) {
 		json_t *opaque = json_object_get(root, "opaque_id");
 		const char *opaque_id = opaque ? json_string_value(opaque) : NULL;
 
+		/* added streamworks */
 		json_t *candidate= json_object_get(root, "candidate_mode");
 		int candidate_mode = candidate ?  json_integer_value(candidate) : 3;
 
