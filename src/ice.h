@@ -359,6 +359,8 @@ struct janus_ice_handle {
 	guint64 handle_id;
 	/*! \brief Opaque identifier, e.g., to provide inter-handle relationships to external tools */
 	char *opaque_id;
+	/*! \brief local caididate v4 only added by streamworks */
+	uint candidate_mode;
 	/*! \brief Token that was used to attach the handle, if required */
 	char *token;
 	/*! \brief Monotonic time of when the handle has been created */
@@ -681,7 +683,7 @@ void janus_ice_trickle_destroy(janus_ice_trickle *trickle);
  * @param[in] opaque_id The opaque identifier provided by the creator, if any (optional)
  * @param[in] token The auth token provided by the creator, if any (optional)
  * @returns The created Janus ICE handle if successful, NULL otherwise */
-janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque_id, const char *token);
+janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque_id, const char *token, int candidate_mode);
 /*! \brief Method to attach a Janus ICE handle to a plugin
  * \details This method is very important, as it allows plugins to send/receive media (RTP/RTCP) to/from a WebRTC peer.
  * @param[in] core_session The core/peer session this ICE handle belongs to

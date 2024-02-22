@@ -1251,10 +1251,20 @@ int janus_process_incoming_request(janus_request *request) {
 		}
 		json_t *opaque = json_object_get(root, "opaque_id");
 		const char *opaque_id = opaque ? json_string_value(opaque) : NULL;
+
+		json_t *candidate= json_object_get(root, "candidate_mode");
+		int candidate_mode = candidate ?  json_integer_value(candidate) : 3;
+
 		json_t *loop = json_object_get(root, "loop_index");
 		int loop_index = loop ? json_integer_value(loop) : -1;
+
+		JANUS_LOG(LOG_VERB, "attach %"SCNu64" candidate_mode:%d \n", session_id,candidate_mode);
+
 		/* Create handle */
-		handle = janus_ice_handle_create(session, opaque_id, token_value);
+		if (candidate_mode == 0){
+			candidate_mode = 3;
+		}
+		handle = janus_ice_handle_create(session, opaque_id, token_value, candidate_mode);
 		if(handle == NULL) {
 			ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_UNKNOWN, "Memory error");
 			goto jsondone;

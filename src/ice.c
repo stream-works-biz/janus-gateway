@@ -1395,8 +1395,8 @@ static void *janus_ice_handle_thread(void *data) {
 	g_thread_unref(g_thread_self());
 	return NULL;
 }
-
-janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque_id, const char *token) {
+// candidate_v4_only added by streamworks
+janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque_id, const char *token,int candidate_mode) {
 	if(core_session == NULL)
 		return NULL;
 	janus_session *session = (janus_session *)core_session;
@@ -1420,6 +1420,7 @@ janus_ice_handle *janus_ice_handle_create(void *core_session, const char *opaque
 		handle->opaque_id = g_strdup(opaque_id);
 	if(token)
 		handle->token = g_strdup(token);
+	handle->candidate_mode = candidate_mode;
 	handle->created = janus_get_monotonic_time();
 	handle->handle_id = handle_id;
 	handle->app = NULL;
@@ -3732,8 +3733,11 @@ int janus_ice_setup_local(janus_ice_handle *handle, gboolean offer, gboolean tri
 			family = ifa->ifa_addr->sa_family;
 			if(family != AF_INET && family != AF_INET6)
 				continue;
-			/* We only add IPv6 addresses if support for them has been explicitly enabled */
-			if(family == AF_INET6 && !janus_ipv6_enabled)
+			/* We only add IPv4 addresses if support for them has been explicitly enabled added stream-works*/
+			if(family == AF_INET && (handle->candidate_mode & 0x1) ==0 )
+				continue;
+			/* We only add IPv6 addresses if support for them has been explicitly enabled  added stream-works */
+			if(family == AF_INET6 && (!janus_ipv6_enabled || (handle->candidate_mode & 0x02)==0))
 				continue;
 			/* Check the interface name first, we can ignore that as well: enforce list would be checked later */
 			if(janus_ice_enforce_list == NULL && ifa->ifa_name != NULL && janus_ice_is_ignored(ifa->ifa_name))
