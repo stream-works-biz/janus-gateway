@@ -2648,8 +2648,14 @@ static janus_rtp_forwarder *janus_videoroom_rtp_forwarder_add_helper(janus_video
 	/* Create a new RTP forwarder */
 	janus_rtp_forwarder *rf = janus_rtp_forwarder_create(JANUS_VIDEOROOM_NAME, 0,
 		p->udp_sock, host, port, ssrc, pt, srtp_suite, srtp_crypto, simulcast, substream, is_video, is_data);
-	if(rf == NULL)
+
+	if(rf == NULL){
+		// streamworks
+		janus_refcount_decrease(&ps->ref);
+		janus_refcount_decrease(&p->ref);
 		return NULL;
+	}
+
 	rf->source = ps;
 	if(simulcast && ps->rid_extmap_id > 0)
 		rf->sim_context.rid_ext_id = ps->rid_extmap_id;
