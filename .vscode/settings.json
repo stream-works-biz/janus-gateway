@@ -5,6 +5,7 @@
         "ice.h": "c",
         "sdp.h": "c",
         "dtls.h": "c",
-        "rtpsrtp.h": "c"
+        "rtpsrtp.h": "c",
+        "functional": "c"
     }
 }

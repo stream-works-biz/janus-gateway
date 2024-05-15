@@ -420,7 +420,7 @@ void janus_rtp_forwarder_destroy(janus_rtp_forwarder *rf) {
 			g_hash_table_remove(rtpfwds, id);
 		janus_mutex_unlock(&rtpfwds_mutex);
 		janus_refcount_decrease(&rf->ref);
-
+		// streamworks
 		JANUS_LOG(LOG_VERB, "rtp forwarder destroy stream_id: %s\n",id);
 	}
 }

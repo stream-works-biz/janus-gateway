@@ -693,6 +693,7 @@
 #include "../sdp-utils.h"
 #include "../utils.h"
 #include "../ip-utils.h"
+#include "../rtpfwd.h"
 
 
 /* Plugin information */
@@ -846,6 +847,23 @@ static struct janus_json_parameter sipmessage_parameters[] = {
 	{"headers", JSON_OBJECT, 0},
 	{"call_id", JANUS_JSON_STRING, 0}
 };
+
+// streamworks
+static struct janus_json_parameter rtp_forward_parameters[] = {
+	{"secret", JSON_STRING, 0},
+	{"host", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
+	{"host_family", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
+	{"video_port", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE},
+	{"video_rtcp_port", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE},
+	{"audio_port", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE},
+	{"audio_rtcp_port", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE},
+};
+static struct janus_json_parameter stop_rtp_forward_parameters[] = {
+	{"secret", JSON_STRING, 0},
+	{"audio_stream_id", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE},
+	{"video_stream_id", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE}
+};
+
 
 /* Useful stuff */
 static volatile gint initialized = 0, stopping = 0;
@@ -1088,6 +1106,12 @@ typedef struct janus_sip_session {
 	GList *active_calls;
 	janus_refcount ref;
 	janus_sip_dtmf latest_dtmf;
+
+	// streamworks
+	GHashTable *rtp_forwarders;			/* RTP forwarders list (as a hashmap) */
+	janus_mutex rtp_forwarders_mutex;	/* Mutex to lock the RTP forwarders list */
+	int udp_sock;						/* UDP socket to use to forward RTP packets */
+
 } janus_sip_session;
 
 static GHashTable *sessions;
@@ -1101,6 +1125,11 @@ static janus_mutex sessions_mutex = JANUS_MUTEX_INITIALIZER;
 static void janus_sip_srtp_cleanup(janus_sip_session *session);
 static void janus_sip_media_reset(janus_sip_session *session);
 static void janus_sip_rtcp_pli_send(janus_sip_session *session);
+
+// streamworks
+static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,janus_sip_message *msg , gboolean* handled);
+static void janus_sip_rtp_forwarder_rtcp_receive(janus_rtp_forwarder *rf, char *buffer, int len);
+static janus_rtp_forwarder* janus_sip_rtp_forwarder_add_helper(janus_sip_session *session,	const gchar *host, int port,int rtcp_port, gboolean is_video);
 
 static void janus_sip_call_update_status(janus_sip_session *session, janus_sip_call_status new_status) {
 	if(session->status != new_status) {
@@ -1223,6 +1252,19 @@ static void janus_sip_session_free(const janus_refcount *session_ref) {
 		g_list_free_full(session->incoming_header_prefixes, g_free);
 		session->incoming_header_prefixes = NULL;
 	}
+
+	//streamworks
+	if(session->udp_sock > 0)
+		close(session->udp_sock);
+
+	janus_mutex_lock(&session->rtp_forwarders_mutex);
+	g_hash_table_destroy(session->rtp_forwarders);
+	janus_mutex_unlock(&session->rtp_forwarders_mutex);
+	
+	janus_mutex_destroy(&session->rtp_forwarders_mutex);
+	janus_mutex_destroy(&session->rec_mutex);
+	janus_mutex_destroy(&session->mutex);
+
 	janus_sip_srtp_cleanup(session);
 	g_free(session);
 }
@@ -2278,11 +2320,15 @@ void janus_sip_create_session(janus_plugin_session *handle, int *error) {
 	session->media.video_remote_policy.ssrc.type = ssrc_any_inbound;
 	session->media.video_local_policy.ssrc.type = ssrc_any_inbound;
 	janus_mutex_init(&session->rec_mutex);
+	janus_mutex_init(&session->rtp_forwarders_mutex);
 	g_atomic_int_set(&session->establishing, 0);
 	g_atomic_int_set(&session->established, 0);
 	g_atomic_int_set(&session->hangingup, 0);
 	g_atomic_int_set(&session->destroyed, 0);
 	janus_mutex_init(&session->mutex);
+
+	session->rtp_forwarders = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)janus_rtp_forwarder_destroy);
+	
 	handle->plugin_handle = session;
 	janus_refcount_init(&session->ref, janus_sip_session_free);
 
@@ -2441,15 +2487,22 @@ struct janus_plugin_result *janus_sip_handle_message(janus_plugin_session *handl
 	janus_refcount_increase(&session->ref);
 	janus_mutex_unlock(&sessions_mutex);
 
+	json_t *response = NULL;
+	gboolean handled = FALSE;
+
 	janus_sip_message *msg = g_malloc(sizeof(janus_sip_message));
 	msg->handle = handle;
 	msg->transaction = transaction;
 	msg->message = message;
 	msg->jsep = jsep;
-	g_async_queue_push(messages, msg);
 
-	/* All the requests to this plugin are handled asynchronously */
-	return janus_plugin_result_new(JANUS_PLUGIN_OK_WAIT, NULL, NULL);
+	response = janus_sip_process_synchronous_request(session,msg,&handled);
+	if (handled){
+		return janus_plugin_result_new(response ? JANUS_PLUGIN_OK:JANUS_PLUGIN_OK_WAIT, NULL, response);
+	} else {
+		g_async_queue_push(messages, msg);
+		return janus_plugin_result_new(JANUS_PLUGIN_OK_WAIT, NULL, NULL);
+	}
 }
 
 void janus_sip_setup_media(janus_plugin_session *handle) {
@@ -2600,6 +2653,19 @@ void janus_sip_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *pack
 				}
 			}
 		}
+		/* Forward RTP to the appropriate port for the rtp_forwarders associated with this session, if there are any */
+		janus_mutex_lock(&session->rtp_forwarders_mutex);
+		GHashTableIter iter;
+		gpointer value;
+		g_hash_table_iter_init(&iter, session->rtp_forwarders);
+		while(session->udp_sock > 0 && g_hash_table_iter_next(&iter, NULL, &value)) {
+			janus_rtp_forwarder *rtp_forward = (janus_rtp_forwarder *)value;
+			if( (video && !rtp_forward->is_video) || (!video && rtp_forward->is_video)){
+				continue;
+			}
+			janus_rtp_forwarder_send_rtp(rtp_forward,buf, len, 0);
+		}
+		janus_mutex_unlock(&session->rtp_forwarders_mutex);
 	}
 }
 
@@ -4006,6 +4072,13 @@ static void *janus_sip_handler(void *data) {
 				json_object_set_new(info, "event", json_string(answer ? "accepted" : "accepting"));
 				if(session->callid)
 					json_object_set_new(info, "call-id", json_string(session->callid));
+				if (session->media.video_orientation_extension_id && answer)
+					json_object_set_new(info, "video_orientation_extension_id", json_integer(session->media.video_orientation_extension_id));
+				if (session->media.audio_pt_name && answer)
+					json_object_set_new(info, "audio_codec", json_string(session->media.audio_pt_name ));
+				if (session->media.video_pt_name && answer)
+					json_object_set_new(info, "video_codec", json_string(session->media.video_pt_name ));
+					
 				gateway->notify_event(&janus_sip_plugin, session->handle, info);
 			}
 			/* Check if the OK needs to be enriched with custom headers */
@@ -4274,12 +4347,10 @@ static void *janus_sip_handler(void *data) {
 			}
 			/* Reject an incoming call */
 			if(session->status != janus_sip_call_status_invited) {
-				JANUS_LOG(LOG_ERR, "Wrong state (not invited? status=%s)\n", janus_sip_call_status_string(session->status));
-				/* Ignore */
+				/* Ignore Streamworks*/
+				JANUS_LOG(LOG_VERB, "Ignore Wrong state (not invited? status=%s)\n", janus_sip_call_status_string(session->status));
 				janus_sip_message_free(msg);
 				continue;
-				//~ g_snprintf(error_cause, 512, "Wrong state (not in a call?)");
-				//~ goto error;
 			}
 			janus_mutex_lock(&session->mutex);
 			if(session->callee == NULL) {
@@ -4409,12 +4480,10 @@ static void *janus_sip_handler(void *data) {
 		} else if(!strcasecmp(request_text, "hold") || !strcasecmp(request_text, "unhold")) {
 			/* We either need to put the call on-hold, or resume it */
 			if(session->status != janus_sip_call_status_incall) {
-				JANUS_LOG(LOG_ERR, "Wrong state (not in a call? status=%s)\n", janus_sip_call_status_string(session->status));
-				/* Ignore */
+				/* streamworks Ignore */
+				JANUS_LOG(LOG_VERB, "Ignore Wrong state (not in a call? status=%s)\n", janus_sip_call_status_string(session->status));
 				janus_sip_message_free(msg);
 				continue;
-				//~ g_snprintf(error_cause, 512, "Wrong state (not in a call?)");
-				//~ goto error;
 			}
 			janus_mutex_lock(&session->mutex);
 			if(session->callee == NULL) {
@@ -4524,10 +4593,8 @@ static void *janus_sip_handler(void *data) {
 		} else if(!strcasecmp(request_text, "hangup")) {
 			/* Hangup an ongoing call */
 			if(!janus_sip_call_is_established(session) && session->status != janus_sip_call_status_inviting) {
-				/* Ignore */
-				// streamworks
-				// JANUS_LOG(LOG_ERR, "Wrong state (not established/inviting? status=%s)\n",janus_sip_call_status_string(session->status));
-
+				/* streamworks Ignore */
+				JANUS_LOG(LOG_VERB, "Ignore Wrong state (not established/inviting? status=%s)\n",janus_sip_call_status_string(session->status));
 				janus_sip_message_free(msg);
 				continue;
 			}
@@ -4991,13 +5058,14 @@ static void *janus_sip_handler(void *data) {
 			/* Notify the result */
 			result = json_object();
 			json_object_set_new(result, "event", json_string("reset"));
+
+		// streamworks
 		} else {
 			JANUS_LOG(LOG_ERR, "Unknown request (%s)\n", request_text);
 			error_code = JANUS_SIP_ERROR_INVALID_REQUEST;
 			g_snprintf(error_cause, 512, "Unknown request (%s)", request_text);
 			goto error;
 		}
-
 done:
 		{
 			/* Prepare JSON event */
@@ -5030,7 +5098,6 @@ error:
 	JANUS_LOG(LOG_VERB, "Leaving SIP handler thread\n");
 	return NULL;
 }
-
 
 /* Sofia callbacks */
 void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase, nua_t *nua, nua_magic_t *magic, nua_handle_t *nh, nua_hmagic_t *hmagic, sip_t const *sip, tagi_t tags[])
@@ -6070,6 +6137,12 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				if(session->callid)
 					json_object_set_new(info, "call-id", json_string(session->callid));
 				json_object_set_new(info, "username", json_string(session->callee));
+				if (session->media.video_orientation_extension_id && !in_progress)
+					json_object_set_new(info, "video_orientation_extension_id", json_integer(session->media.video_orientation_extension_id));
+				if (session->media.audio_pt_name &&  !in_progress)
+					json_object_set_new(info, "audio_codec", json_string(session->media.audio_pt_name ));
+				if (session->media.video_pt_name &&  !in_progress)
+					json_object_set_new(info, "video_codec", json_string(session->media.video_pt_name ));
 				gateway->notify_event(&janus_sip_plugin, session->handle, info);
 			}
 			if(session->media.update) {
@@ -6708,6 +6781,7 @@ static int janus_sip_allocate_local_ports(janus_sip_session *session, gboolean u
 	gboolean use_ipv6_address_family = !ipv6_disabled &&
 		(janus_network_address_is_null(&janus_network_local_media_ip) || janus_network_local_media_ip.family == AF_INET6);
 	socklen_t addrlen = use_ipv6_address_family? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in);
+
 	/* Start */
 	int attempts = 100;	/* FIXME Don't retry forever */
 	if(session->media.has_audio) {
@@ -7396,7 +7470,6 @@ static void *janus_sip_relay_thread(void *data) {
 	return NULL;
 }
 
-
 /* Sofia Event thread */
 gpointer janus_sip_sofia_thread(gpointer user_data) {
 	janus_sip_session *session = (janus_sip_session *)user_data;
@@ -7574,5 +7647,317 @@ static void janus_sip_rtcp_pli_send(janus_sip_session *session) {
 			JANUS_LOG(LOG_HUGE, "[SIP-%s] Error sending RTCP video packet... %s (len=%d)...\n",
 				session->account.username, g_strerror(errno), rtcp_len);
 		}
+	}
+}
+
+/* Helper method to process synchronous requests */
+static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,janus_sip_message *msg , gboolean* handled) {
+	*handled = TRUE;
+	json_t *root = msg->message;
+	int error_code = 0;
+	char error_cause[512];
+
+	if(!json_is_object(root)) {
+		JANUS_LOG(LOG_ERR, "JSON error: not an object\n");
+		error_code = JANUS_SIP_ERROR_INVALID_JSON;
+		g_snprintf(error_cause, 512, "JSON error: not an object");
+		goto prepare_response;
+	}
+	JANUS_VALIDATE_JSON_OBJECT(root, request_parameters,
+		error_code, error_cause, TRUE,
+		JANUS_SIP_ERROR_MISSING_ELEMENT, JANUS_SIP_ERROR_INVALID_ELEMENT);
+	if(error_code != 0)
+		goto prepare_response;
+
+	json_t *request = json_object_get(root, "request");
+	const char *request_text = json_string_value(request);
+
+	if(strcasecmp(request_text, "rtp_forward") && strcasecmp(request_text, "stop_rtp_forward") && strcasecmp(request_text, "send_pli")) {
+		*handled = FALSE;
+		return NULL;
+	}
+
+	json_t *response = NULL;
+
+	janus_mutex_lock(&session->mutex);
+
+	if(g_atomic_int_get(&session->destroyed)) {
+		janus_mutex_unlock(&session->mutex);
+		janus_sip_message_free(msg);
+		return NULL;
+	}
+
+	if(!janus_sip_call_is_established(session)) {
+		JANUS_LOG(LOG_VERB, "Ignore Wrong state (not established? status=%s)\n", janus_sip_call_status_string(session->status));
+		janus_mutex_unlock(&session->mutex);
+		janus_sip_message_free(msg);
+		return NULL;
+	}
+
+	if(!strcasecmp(request_text, "rtp_forward")) {
+		/* Are we using the new approach, or the old deprecated one? */
+		JANUS_VALIDATE_JSON_OBJECT(root, rtp_forward_parameters,error_code, error_cause, TRUE,JANUS_SIP_ERROR_MISSING_ELEMENT, JANUS_SIP_ERROR_INVALID_ELEMENT);
+		if(error_code != 0)
+			goto prepare_response;
+
+		json_t *json_host = json_object_get(root, "host");
+		json_t *json_host_family = json_object_get(root, "host_family");
+		const char *host_family = json_string_value(json_host_family);
+		int family = 0;
+		if(host_family) {
+			if(!strcasecmp(host_family, "ipv4")) {
+				family = AF_INET;
+			} else if(!strcasecmp(host_family, "ipv6")) {
+				family = AF_INET6;
+			} else {
+				JANUS_LOG(LOG_ERR, "Unsupported protocol family (%s)\n", host_family);
+				error_code = JANUS_SIP_ERROR_INVALID_REQUEST;
+				g_snprintf(error_cause, 512, "Unsupported protocol family (%s)", host_family);
+				goto prepare_response;
+			}
+		}
+
+		/* Check if we need to resolve this host address */
+		const char *host = json_string_value(json_host), *resolved_host = NULL;
+		struct addrinfo *res = NULL, *start = NULL;
+		janus_network_address addr;
+		janus_network_address_string_buffer addr_buf;
+		struct addrinfo hints;
+		memset(&hints, 0, sizeof(hints));
+		if(family != 0)
+			hints.ai_family = family;
+
+		if(getaddrinfo(host, NULL, family != 0 ? &hints : NULL, &res) == 0) {
+			start = res;
+			while(res != NULL) {
+				if(janus_network_address_from_sockaddr(res->ai_addr, &addr) == 0 &&
+					janus_network_address_to_string_buffer(&addr, &addr_buf) == 0) {
+					/* Resolved */
+					resolved_host = janus_network_address_string_from_buffer(&addr_buf);
+					freeaddrinfo(start);
+					start = NULL;
+					break;
+				}
+				res = res->ai_next;
+			}
+		}
+
+		if(resolved_host == NULL) {
+			if(start)
+				freeaddrinfo(start);
+			JANUS_LOG(LOG_ERR, "Could not resolve address (%s)...\n", host);
+			error_code = JANUS_SIP_ERROR_INVALID_REQUEST;
+			g_snprintf(error_cause, 512, "Could not resolve address (%s)...", host);
+			goto prepare_response;
+		}
+		host = resolved_host;
+
+		/* rtp_forward an existing call */
+		if(!janus_sip_call_is_established(session)) {
+			JANUS_LOG(LOG_VERB, "Ignore Wrong state (not in a call? status=%s)\n", janus_sip_call_status_string(session->status));
+			goto ignore_error;
+		}
+
+		if(session->udp_sock <= 0) {
+			session->udp_sock = socket(!ipv6_disabled ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+			int v6only = 0;
+			if(session->udp_sock <= 0 || (!ipv6_disabled && setsockopt(session->udp_sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only)) != 0)) {
+				JANUS_LOG(LOG_ERR, "[SIP-%s] Could not open UDP socket for RTP stream %d (%s)\n",session->account.username, errno, g_strerror(errno));
+				error_code = JANUS_SIP_ERROR_UNKNOWN_ERROR;
+				g_snprintf(error_cause, 512, "Could not open UDP socket for RTP stream");
+				goto prepare_response;
+			}
+		}
+
+		int audio_port = -1;
+		int audio_rtcp_port = -1;
+		json_t *au_port = json_object_get(root, "audio_port");
+		json_t *au_rtcp_port = json_object_get(root, "audio_rtcp_port");
+		if(au_port) {
+			audio_port = json_integer_value(au_port);
+			if(au_rtcp_port){
+				audio_rtcp_port = json_integer_value(au_rtcp_port);
+			}
+		}
+
+		int video_port = -1;
+		int video_rtcp_port = -1;
+		json_t *vid_port = json_object_get(root, "video_port");
+		json_t *vid_rtcp_port = json_object_get(root, "video_rtcp_port");
+		if(vid_port) {
+			video_port = json_integer_value(vid_port);
+			if(vid_rtcp_port){
+				video_rtcp_port = json_integer_value(vid_rtcp_port);
+			}
+		}
+		/* Create all the forwarders we need */
+		janus_rtp_forwarder *f = NULL;
+		guint32 audio_handle = 0;
+		guint32 video_handle = 0;
+		if(audio_port > 0) {
+			if ((f = janus_sip_rtp_forwarder_add_helper(session,host, audio_port, audio_rtcp_port,FALSE)))
+				audio_handle = f->stream_id;
+		}
+		if(video_port > 0) {
+			if ((f = janus_sip_rtp_forwarder_add_helper(session,host, video_port, video_rtcp_port,TRUE))){
+				if(session->media.video_pli_supported){
+					janus_sip_rtcp_pli_send(session);
+				}
+				video_handle = f->stream_id;
+			}
+		}
+		response = json_object();
+		json_object_set_new(response, "event", json_string("rtp_forward"));
+		json_object_set_new(response, "call-id", json_string(session->callid));
+		json_object_set_new(response, "audio_stream_id", json_integer(audio_handle));
+		json_object_set_new(response, "video_stream_id", json_integer(video_handle));
+
+		/* Send an event back */
+		if(notify_events && gateway->events_is_enabled()) {
+			json_t *info = json_object();
+			json_object_set_new(info, "event", json_string("rtp_forward"));
+			json_object_set_new(info, "call-id", json_string(session->callid));
+			json_object_set_new(info, "audio_stream_id", json_integer(audio_handle));
+			json_object_set_new(info, "video_stream_id", json_integer(video_handle));
+			gateway->notify_event(&janus_sip_plugin, session->handle, info);
+		}
+	
+	} else if(!strcasecmp(request_text, "stop_rtp_forward")) {
+		JANUS_VALIDATE_JSON_OBJECT(root, stop_rtp_forward_parameters,error_code, error_cause, TRUE,JANUS_SIP_ERROR_MISSING_ELEMENT, JANUS_SIP_ERROR_INVALID_ELEMENT);
+		if(error_code != 0)
+			goto prepare_response;
+
+		gboolean auido_removed = FALSE;
+		gboolean video_removed = FALSE;
+		guint32 audio_stream_id  = 0;
+		guint32 video_stream_id  = 0;
+
+		janus_mutex_lock(&session->rtp_forwarders_mutex);
+		json_t *audio_id = json_object_get(root, "audio_stream_id");
+		if(audio_id) {
+			audio_stream_id = json_integer_value(audio_id);
+			auido_removed = g_hash_table_remove(session->rtp_forwarders, GUINT_TO_POINTER(audio_stream_id));
+		}
+		json_t *video_id = json_object_get(root, "video_stream_id");
+		if(video_id) {
+			video_stream_id = json_integer_value(video_id);
+			video_removed = g_hash_table_remove(session->rtp_forwarders, GUINT_TO_POINTER(video_stream_id));
+		}
+		janus_mutex_unlock(&session->rtp_forwarders_mutex);
+
+		response = json_object();
+		json_object_set_new(response, "event", json_string("stop_rtp_forward"));
+		json_object_set_new(response, "call-id", json_string(session->callid));
+		json_object_set_new(response, "audio_stream_id", json_integer(auido_removed ? audio_stream_id:0));
+		json_object_set_new(response, "video_stream_id", json_integer(video_removed ? video_stream_id:0));
+		
+		if(notify_events && gateway->events_is_enabled()) {
+			json_t *info = json_object();
+			json_object_set_new(info, "event", json_string("stop_rtp_forward"));
+			json_object_set_new(info, "call-id", json_string(session->callid));
+			json_object_set_new(info, "audio_stream_id", json_integer(auido_removed ? audio_stream_id:0));
+			json_object_set_new(info, "video_stream_id", json_integer(video_removed ? video_stream_id:0));
+			gateway->notify_event(&janus_sip_plugin, session->handle, info);
+		}
+
+	} else if(!strcasecmp(request_text, "send_pli")) {
+		response = json_object();
+		json_object_set_new(response, "event", json_string("send_pli"));
+		json_object_set_new(response, "call-id", json_string(session->callid));
+		if (session->media.has_video){
+			gateway->send_pli(session->handle);
+			json_object_set_new(response, "sended", json_boolean(TRUE));
+		}else{
+			json_object_set_new(response, "sended", json_boolean(FALSE));
+		}
+	}
+
+prepare_response:
+	{
+		if(error_code == 0 && !response) {
+			error_code = JANUS_SIP_ERROR_UNKNOWN_ERROR;
+			g_snprintf(error_cause, 512, "Invalid response");
+		}
+		if(error_code != 0) {
+			/* Prepare JSON error event */
+			response = json_object();
+			json_object_set_new(response, "videoroom", json_string("event"));
+			json_object_set_new(response, "error_code", json_integer(error_code));
+			json_object_set_new(response, "error", json_string(error_cause));
+		}
+		janus_sip_message_free(msg);
+		janus_mutex_unlock(&session->mutex);
+		return response;
+	}
+
+ignore_error:
+	{
+		janus_sip_message_free(msg);
+		janus_mutex_unlock(&session->mutex);
+		return NULL;
+	}
+}
+
+static janus_rtp_forwarder* janus_sip_rtp_forwarder_add_helper(
+	janus_sip_session *session,	const gchar *host, int port,int rtcp_port, gboolean is_video) {
+	if(session == NULL || host == NULL)
+		return NULL;
+
+	janus_refcount_increase(&session->ref);
+
+	/* Create a new RTP forwarder */
+	janus_rtp_forwarder *rf = janus_rtp_forwarder_create(
+		JANUS_SIP_NAME, 
+		0,						// stream id (Autogenerate)
+		session->udp_sock, 
+		host, 
+		port, 
+		0,						// overwrite ssrc 
+		0,						// overwrite palyload type 
+		0, 						// srtp_suite, 
+		NULL,					// srtp_crypto, 
+		FALSE, 					// simulcast
+		0, 						// substream
+		is_video, 
+		FALSE					// is data
+	);
+
+	if(rf == NULL){
+		janus_refcount_decrease(&session->ref);
+		return NULL;
+	}
+
+	rf->source = session;
+
+	/* Add the forwarder to the ones we have in the session */
+	janus_mutex_lock(&session->rtp_forwarders_mutex);
+	g_hash_table_insert(session->rtp_forwarders, GUINT_TO_POINTER(rf->stream_id), rf);
+	janus_mutex_unlock(&session->rtp_forwarders_mutex);
+
+	/* If we need to add RTCP too, do that now */
+	if(rtcp_port > 0) {
+		int res = janus_rtp_forwarder_add_rtcp(rf, rtcp_port, &janus_sip_rtp_forwarder_rtcp_receive);
+		if(res < 0) {
+			JANUS_LOG(LOG_WARN, "Error adding RTCP support to new RTP forwarder (%d)...\n", res);
+		}
+	}
+	/* Done */
+	janus_refcount_decrease(&session->ref);
+
+	JANUS_LOG(LOG_VERB, "[SIP-%s] Added %s rtp_forward host: %s:%d rtcp:%d stream_id: %"SCNu32"\n",
+		 session->account.username, is_video ? "video" : "audio",host, port,rtcp_port, rf->stream_id);
+
+	return rf;
+}
+
+static void janus_sip_rtp_forwarder_rtcp_receive(janus_rtp_forwarder *rf, char *buffer, int len) {
+	if(len > 0 && janus_is_rtcp(buffer, len)) {
+		JANUS_LOG(LOG_VERB, "rtp_forward stream_id: %"SCNu32" Got %s RTCP packet: %d bytes\n", rf->stream_id, rf->is_video ? "video" : "audio", len);
+		/* We only handle incoming video PLIs or FIR at the moment */
+		if(!janus_rtcp_has_fir(buffer, len) && !janus_rtcp_has_pli(buffer, len))
+			return;
+
+		/* Regular forwarder, send the PLI to the stream associated with it */
+		janus_sip_rtcp_pli_send((janus_sip_session *)rf->source);
 	}
 }
