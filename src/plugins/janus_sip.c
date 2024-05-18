@@ -4066,21 +4066,7 @@ static void *janus_sip_handler(void *data) {
 				if(s && json_array_size(s) > 0)
 					session->media.simulcast_ssrc = json_integer_value(json_array_get(s, 0));
 			}
-			/* Also notify event handlers */
-			if(notify_events && gateway->events_is_enabled()) {
-				json_t *info = json_object();
-				json_object_set_new(info, "event", json_string(answer ? "accepted" : "accepting"));
-				if(session->callid)
-					json_object_set_new(info, "call-id", json_string(session->callid));
-				if (session->media.video_orientation_extension_id && answer)
-					json_object_set_new(info, "video_orientation_extension_id", json_integer(session->media.video_orientation_extension_id));
-				if (session->media.audio_pt_name && answer)
-					json_object_set_new(info, "audio_codec", json_string(session->media.audio_pt_name ));
-				if (session->media.video_pt_name && answer)
-					json_object_set_new(info, "video_codec", json_string(session->media.video_pt_name ));
-					
-				gateway->notify_event(&janus_sip_plugin, session->handle, info);
-			}
+			
 			/* Check if the OK needs to be enriched with custom headers */
 			char custom_headers[8192];
 			janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
@@ -4125,6 +4111,24 @@ static void *janus_sip_handler(void *data) {
 					g_error_free(error);
 				}
 			}
+
+			// streamworks move afer set janus_sip_call_status_incall.
+			/* Also notify event handlers */
+			if(notify_events && gateway->events_is_enabled()) {
+				json_t *info = json_object();
+				json_object_set_new(info, "event", json_string(answer ? "accepted" : "accepting"));
+				if(session->callid)
+					json_object_set_new(info, "call-id", json_string(session->callid));
+				if (session->media.video_orientation_extension_id && answer)
+					json_object_set_new(info, "video_orientation_extension_id", json_integer(session->media.video_orientation_extension_id));
+				if (session->media.audio_pt_name && answer)
+					json_object_set_new(info, "audio_codec", json_string(session->media.audio_pt_name ));
+				if (session->media.video_pt_name && answer)
+					json_object_set_new(info, "video_codec", json_string(session->media.video_pt_name ));
+					
+				gateway->notify_event(&janus_sip_plugin, session->handle, info);
+			}
+
 		} else if(!strcasecmp(request_text, "update")) {
 			/* Update an existing call */
 			if(!(session->status == janus_sip_call_status_incall_reinvited || session->status == janus_sip_call_status_incall)) {
@@ -7695,7 +7699,17 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 	}
 
 	if(!janus_sip_call_is_established(session)) {
-		JANUS_LOG(LOG_VERB, "Ignore Wrong state (not established? status=%s)\n", janus_sip_call_status_string(session->status));
+		JANUS_LOG(LOG_VERB, "%s Ignore Wrong state (not established? status=%s)\n",request_text, janus_sip_call_status_string(session->status));
+
+		/* Send an event back */
+		if(notify_events && gateway->events_is_enabled()) {
+			json_t *info = json_object();
+			json_object_set_new(info, "event", json_string("rtp_forward"));
+			json_object_set_new(info, "call-id", json_string(session->callid));
+			json_object_set_new(info, "result", json_integer(-1));
+			gateway->notify_event(&janus_sip_plugin, session->handle, info);
+		}
+
 		janus_mutex_unlock(&session->mutex);
 		janus_sip_message_free(msg);
 		return NULL;
@@ -7826,6 +7840,7 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 			json_object_set_new(info, "call-id", json_string(session->callid));
 			json_object_set_new(info, "audio_stream_id", json_integer(audio_handle));
 			json_object_set_new(info, "video_stream_id", json_integer(video_handle));
+			json_object_set_new(info, "result", json_integer(0));
 			gateway->notify_event(&janus_sip_plugin, session->handle, info);
 		}
 	
@@ -7864,6 +7879,7 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 			json_object_set_new(info, "call-id", json_string(session->callid));
 			json_object_set_new(info, "audio_stream_id", json_integer(auido_removed ? audio_stream_id:0));
 			json_object_set_new(info, "video_stream_id", json_integer(video_removed ? video_stream_id:0));
+			json_object_set_new(info, "result", json_integer(0));
 			gateway->notify_event(&janus_sip_plugin, session->handle, info);
 		}
 
@@ -7874,8 +7890,10 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 		if (session->media.has_video){
 			gateway->send_pli(session->handle);
 			json_object_set_new(response, "sended", json_boolean(TRUE));
+			json_object_set_new(info, "result", json_integer(0));
 		}else{
 			json_object_set_new(response, "sended", json_boolean(FALSE));
+			json_object_set_new(info, "result", json_integer(-1));
 		}
 	}
 
