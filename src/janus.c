@@ -618,6 +618,9 @@ void janus_plugin_notify_event(janus_plugin *plugin, janus_plugin_session *plugi
 gboolean janus_plugin_auth_is_signed(void);
 gboolean janus_plugin_auth_is_signature_valid(janus_plugin *plugin, const char *token);
 gboolean janus_plugin_auth_signature_contains(janus_plugin *plugin, const char *token, const char *desc);
+
+gboolean janus_plugin_get_session_info(janus_plugin_session *plugin_session,guint64* session_id ,guint64* handle_id,char **opaque_id);
+
 static janus_callbacks janus_handler_plugin =
 	{
 		.push_event = janus_plugin_push_event,
@@ -631,6 +634,7 @@ static janus_callbacks janus_handler_plugin =
 		.end_session = janus_plugin_end_session,
 		.events_is_enabled = janus_events_is_enabled,
 		.notify_event = janus_plugin_notify_event,
+		.get_session_info = janus_plugin_get_session_info,
 		.auth_is_signed = janus_plugin_auth_is_signed,
 		.auth_is_signature_valid = janus_plugin_auth_is_signature_valid,
 		.auth_signature_contains = janus_plugin_auth_signature_contains,
@@ -4363,6 +4367,31 @@ void janus_plugin_end_session(janus_plugin_session *plugin_session) {
 	g_source_set_callback(timeout_source, janus_plugin_end_session_internal, plugin_session, NULL);
 	g_source_attach(timeout_source, sessions_watchdog_context);
 	g_source_unref(timeout_source);
+}
+
+gboolean janus_plugin_get_session_info(janus_plugin_session *plugin_session,guint64* session_id ,guint64* handle_id,char **opaque_id) {
+	*session_id = 0x00;
+	*handle_id = 0x00;
+	*opaque_id = NULL;
+
+	if(!plugin_session || !plugin_session->gateway_handle) {
+		return FALSE;
+	}
+
+	if(!janus_plugin_session_is_alive(plugin_session)) {
+		return FALSE;
+	}
+
+	janus_ice_handle *ice_handle = (janus_ice_handle *)plugin_session->gateway_handle;
+	*handle_id = ice_handle->handle_id;
+	*opaque_id = ice_handle->opaque_id;
+
+	if(!ice_handle->session) {
+		return FALSE;
+	};
+	janus_session *session = (janus_session *)ice_handle->session;
+	*session_id = session->session_id;
+	return TRUE;
 }
 
 void janus_plugin_notify_event(janus_plugin *plugin, janus_plugin_session *plugin_session, json_t *event) {

@@ -3327,6 +3327,25 @@ static void *janus_sip_handler(void *data) {
 				/* Check if the REGISTER needs to be enriched with custom headers */
 				char custom_headers[8192];
 				janus_sip_parse_custom_headers(root, (char *)&custom_headers, sizeof(custom_headers));
+
+				// streamworks added session info header
+				guint64 session_id,handle_id;
+				char *opaque_id;
+				if (gateway->get_session_info(session->handle,&session_id,&handle_id,&opaque_id)){
+					char h[255];
+					g_snprintf(h, 255, "%s: %"SCNu64"", "X-Session", session_id);
+					janus_strlcat(custom_headers, h, sizeof(custom_headers) - 2);
+					janus_strlcat(custom_headers, "\r\n", sizeof(custom_headers));
+
+					g_snprintf(h, 255, "%s: %"SCNu64"", "X-Handle", handle_id);
+					janus_strlcat(custom_headers, h, sizeof(custom_headers) - 2);
+					janus_strlcat(custom_headers, "\r\n", sizeof(custom_headers));
+
+					g_snprintf(h, 255, "%s: %s", "X-Opaque", opaque_id);
+					janus_strlcat(custom_headers, h, sizeof(custom_headers) - 2);
+					janus_strlcat(custom_headers, "\r\n", sizeof(custom_headers));
+				}
+
 				/* Do the same in case there are custom Contact URI params */
 				char custom_params[8192];
 				janus_sip_parse_custom_contact_params(root, (char *)&custom_params, sizeof(custom_params));
@@ -4352,7 +4371,7 @@ static void *janus_sip_handler(void *data) {
 			/* Reject an incoming call */
 			if(session->status != janus_sip_call_status_invited) {
 				/* Ignore Streamworks*/
-				JANUS_LOG(LOG_VERB, "Ignore Wrong state (not invited? status=%s)\n", janus_sip_call_status_string(session->status));
+				JANUS_LOG(LOG_VERB, "%s Ignore Wrong state (not invited? status=%s)\n",request_text, janus_sip_call_status_string(session->status));
 				janus_sip_message_free(msg);
 				continue;
 			}
@@ -4485,7 +4504,7 @@ static void *janus_sip_handler(void *data) {
 			/* We either need to put the call on-hold, or resume it */
 			if(session->status != janus_sip_call_status_incall) {
 				/* streamworks Ignore */
-				JANUS_LOG(LOG_VERB, "Ignore Wrong state (not in a call? status=%s)\n", janus_sip_call_status_string(session->status));
+				JANUS_LOG(LOG_VERB, "%s Ignore Wrong state (not in a call? status=%s)\n",request_text, janus_sip_call_status_string(session->status));
 				janus_sip_message_free(msg);
 				continue;
 			}
@@ -4598,7 +4617,7 @@ static void *janus_sip_handler(void *data) {
 			/* Hangup an ongoing call */
 			if(!janus_sip_call_is_established(session) && session->status != janus_sip_call_status_inviting) {
 				/* streamworks Ignore */
-				JANUS_LOG(LOG_VERB, "Ignore Wrong state (not established/inviting? status=%s)\n",janus_sip_call_status_string(session->status));
+				JANUS_LOG(LOG_VERB, "%s Ignore Wrong state (not established/inviting? status=%s)\n",request_text,janus_sip_call_status_string(session->status));
 				janus_sip_message_free(msg);
 				continue;
 			}
@@ -6217,6 +6236,12 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 					json_object_set_new(info, "identity", json_string(session->account.identity));
 					if(session->account.proxy)
 						json_object_set_new(info, "proxy", json_string(session->account.proxy));
+
+					// streamworks
+					if(session->incoming_header_prefixes) {
+						json_t *headers = janus_sip_get_incoming_headers(sip, session);
+						json_object_set_new(info, "headers", headers);
+					}
 					gateway->notify_event(&janus_sip_plugin, session->handle, info);
 				}
 			} else if(status == 401 || status == 407) {
@@ -7704,9 +7729,9 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 		/* Send an event back */
 		if(notify_events && gateway->events_is_enabled()) {
 			json_t *info = json_object();
-			json_object_set_new(info, "event", json_string("rtp_forward"));
+			json_object_set_new(info, "event", json_string(request_text));
 			json_object_set_new(info, "call-id", json_string(session->callid));
-			json_object_set_new(info, "result", json_integer(-1));
+			json_object_set_new(info, "success", json_boolean(FALSE));
 			gateway->notify_event(&janus_sip_plugin, session->handle, info);
 		}
 
@@ -7773,11 +7798,6 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 		}
 		host = resolved_host;
 
-		/* rtp_forward an existing call */
-		if(!janus_sip_call_is_established(session)) {
-			JANUS_LOG(LOG_VERB, "Ignore Wrong state (not in a call? status=%s)\n", janus_sip_call_status_string(session->status));
-			goto ignore_error;
-		}
 
 		if(session->udp_sock <= 0) {
 			session->udp_sock = socket(!ipv6_disabled ? AF_INET6 : AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -7840,7 +7860,7 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 			json_object_set_new(info, "call-id", json_string(session->callid));
 			json_object_set_new(info, "audio_stream_id", json_integer(audio_handle));
 			json_object_set_new(info, "video_stream_id", json_integer(video_handle));
-			json_object_set_new(info, "result", json_integer(0));
+			json_object_set_new(info, "success", json_boolean(TRUE));
 			gateway->notify_event(&janus_sip_plugin, session->handle, info);
 		}
 	
@@ -7879,7 +7899,7 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 			json_object_set_new(info, "call-id", json_string(session->callid));
 			json_object_set_new(info, "audio_stream_id", json_integer(auido_removed ? audio_stream_id:0));
 			json_object_set_new(info, "video_stream_id", json_integer(video_removed ? video_stream_id:0));
-			json_object_set_new(info, "result", json_integer(0));
+			json_object_set_new(info, "success", json_boolean(TRUE));
 			gateway->notify_event(&janus_sip_plugin, session->handle, info);
 		}
 
@@ -7890,10 +7910,8 @@ static json_t* janus_sip_process_synchronous_request(janus_sip_session* session,
 		if (session->media.has_video){
 			gateway->send_pli(session->handle);
 			json_object_set_new(response, "sended", json_boolean(TRUE));
-			json_object_set_new(info, "result", json_integer(0));
 		}else{
 			json_object_set_new(response, "sended", json_boolean(FALSE));
-			json_object_set_new(info, "result", json_integer(-1));
 		}
 	}
 
@@ -7913,13 +7931,6 @@ prepare_response:
 		janus_sip_message_free(msg);
 		janus_mutex_unlock(&session->mutex);
 		return response;
-	}
-
-ignore_error:
-	{
-		janus_sip_message_free(msg);
-		janus_mutex_unlock(&session->mutex);
-		return NULL;
 	}
 }
 

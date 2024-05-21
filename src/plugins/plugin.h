@@ -421,6 +421,8 @@ struct janus_callbacks {
 	 * @param[in] event The event to notify as a Jansson json_t object */
 	void (* const notify_event)(janus_plugin *plugin, janus_plugin_session *handle, json_t *event);
 
+	gboolean (* const get_session_info)(janus_plugin_session *plugin_session,guint64* session_id ,guint64* handle_id,char **opaque_id);
+
 	/*! \brief Method to check whether the core is using signed tokens
 	 * @returns TRUE if signed tokens are in use, FALSE otherwise */
 	gboolean (* const auth_is_signed)(void);
