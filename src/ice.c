@@ -2080,12 +2080,11 @@ static gboolean janus_ice_check_failed(gpointer data) {
 	}
 	/* Still in the failed state, how much time passed since we first detected it? */
 
-	/* stream-works */
-	/* Let's wait a little longer
+	/* Let's wait a little longer */
 	if(janus_get_monotonic_time() - pc->icefailed_detected < 5*G_USEC_PER_SEC) {
 		return TRUE;
 	}
-	*/
+	
 
 	/* If we got here it means the timer expired, and we should check if this is a failure */
 	gboolean trickle_recv = (!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_TRICKLE) || janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALL_TRICKLES));
@@ -2093,7 +2092,7 @@ static gboolean janus_ice_check_failed(gpointer data) {
 	gboolean alert_set = janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT);
 	/* We may still be waiting for something... but we don't wait forever */
 	gboolean do_wait = TRUE;
-	if(janus_get_monotonic_time() - pc->icefailed_detected >= 15*G_USEC_PER_SEC) {
+	if(janus_get_monotonic_time() - pc->icefailed_detected >= 10*G_USEC_PER_SEC) {
 		do_wait = FALSE;
 	}
 	if(!do_wait || (handle && trickle_recv && answer_recv && !alert_set)) {
@@ -2197,14 +2196,10 @@ static void janus_ice_cb_component_state_changed(NiceAgent *agent, guint stream_
 		/* In case we haven't started a timer yet, let's do it now */
 		if(pc->icestate_source == NULL && pc->icefailed_detected == 0) {
 			pc->icefailed_detected = janus_get_monotonic_time();
-			// stream-works
-			// pc->icestate_source = g_timeout_source_new(500);
-			// g_source_set_callback(pc->icestate_source, janus_ice_check_failed, pc, NULL);
-			// guint id = g_source_attach(pc->icestate_source, handle->mainctx);
-			// JANUS_LOG(LOG_VERB, "[%"SCNu64"] Creating ICE state check timer with ID %u\n", handle->handle_id, id);
-
-			// do not need wait due to liblice waiting failed component.
-			janus_ice_check_failed((gpointer)pc);
+			pc->icestate_source = g_timeout_source_new(500);
+			g_source_set_callback(pc->icestate_source, janus_ice_check_failed, pc, NULL);
+			guint id = g_source_attach(pc->icestate_source, handle->mainctx);
+			JANUS_LOG(LOG_VERB, "[%"SCNu64"] Creating ICE state check timer with ID %u\n", handle->handle_id, id);
 		}
 	}
 }

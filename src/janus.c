@@ -1193,14 +1193,14 @@ int janus_process_incoming_request(janus_request *request) {
 	}
 
 	/* If we got here, make sure we have a session (and/or a handle) */
-	JANUS_LOG(LOG_INFO, "janus_session_find <--  %"SCNu64"...\n", session_id);
+	JANUS_LOG(LOG_HUGE, "janus_session_find <--  %"SCNu64"...\n", session_id);
 	session = janus_session_find(session_id);
 	if(!session) {
 		JANUS_LOG(LOG_ERR, "Couldn't find any session %"SCNu64"...\n", session_id);
 		ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_SESSION_NOT_FOUND, "No such session %"SCNu64"", session_id);
 		goto jsondone;
 	}
-	JANUS_LOG(LOG_INFO, "janus_session_find -->  %"SCNu64"...\n", session_id);
+	JANUS_LOG(LOG_HUGE, "janus_session_find -->  %"SCNu64"...\n", session_id);
 	/* Update the last activity timer */
 	session->last_activity = janus_get_monotonic_time();
 	handle = NULL;
@@ -1216,7 +1216,7 @@ int janus_process_incoming_request(janus_request *request) {
 	/* What is this? */
 	if(!strcasecmp(message_text, "keepalive")) {
 		/* Just a keep-alive message, reply with an ack */
-		JANUS_LOG(LOG_VERB, "Got a keep-alive on session %"SCNu64"\n", session_id);
+		JANUS_LOG(LOG_HUGE, "Got a keep-alive on session %"SCNu64"\n", session_id);
 		json_t *reply = janus_create_message("ack", session_id, transaction_text);
 		/* Send the success reply */
 		ret = janus_process_success(request, reply);
@@ -3488,7 +3488,7 @@ void janus_transportso_close(gpointer key, gpointer value, gpointer user_data) {
 
 /* Transport callback interface */
 void janus_transport_incoming_request(janus_transport *plugin, janus_transport_session *transport, void *request_id, gboolean admin, json_t *message, json_error_t *error) {
-	JANUS_LOG(LOG_VERB, "Got %s API request from %s (%p)\n", admin ? "an admin" : "a Janus", plugin->get_package(), transport);
+	JANUS_LOG(LOG_HUGE, "Got %s API request from %s (%p)\n", admin ? "an admin" : "a Janus", plugin->get_package(), transport);
 	/* Create a janus_request instance to handle the request */
 	janus_request *request = janus_request_new(plugin, transport, request_id, admin, message, message ? NULL : error);
 	/* Enqueue the request, the thread will pick it up */
@@ -3558,7 +3558,7 @@ void janus_transport_notify_event(janus_transport *plugin, void *transport, json
 }
 
 void janus_transport_task(gpointer data, gpointer user_data) {
-	JANUS_LOG(LOG_VERB, "Transport task pool, serving request\n");
+	JANUS_LOG(LOG_HUGE, "Transport task pool, serving request\n");
 	janus_request *request = (janus_request *)data;
 	if(request == NULL) {
 		JANUS_LOG(LOG_ERR, "Missing request\n");
