@@ -9,7 +9,7 @@
                 "/usr/include/nice/**",
                 "/usr/include/sys/**",
                 "/usr/local/src/libsrtp-2.5.0/",
-                "/usr/local/include/sofia-sip-1.13"
+                "/usr/include/sofia-sip-1.12"
             ],
             "defines": [
                 "CONFDIR=\"\"",

@@ -1755,9 +1755,9 @@ static void janus_sip_sofia_logger(void *stream, char const *fmt, va_list ap) {
 	}
 	if(append) {
 		// stream-works
-		if (strstr(sofia_log, "SIP/2.0 100 Trying") != sofia_log){
-			return;
-		}
+		//if (strstr(sofia_log, "SIP/2.0 100 Trying") != sofia_log){
+		//	return;
+		//}
 
 		/* We're copying a message in our buffer: check if this is the end */
 		if(line[3] == '-') {
@@ -1807,6 +1807,8 @@ static void janus_sip_sofia_logger(void *stream, char const *fmt, va_list ap) {
 					json_object_set_new(info, "sip", json_string(sofia_log));
 					gateway->notify_event(&janus_sip_plugin, session->handle, info);
 					janus_refcount_decrease(&session->ref);
+
+					JANUS_LOG(LOG_WARN, "SOFIA \n%s", sofia_log);
 				} else {
 					JANUS_LOG(LOG_WARN, "Couldn't find a session associated to this message, dropping it...\n%s", sofia_log);
 				}
@@ -1845,7 +1847,7 @@ static void janus_sip_sofia_logger(void *stream, char const *fmt, va_list ap) {
 		JANUS_LOG(LOG_HUGE, "Intercepting message (%d bytes)\n", length);
 		if(strstr(line, "-----"))
 			started = TRUE;
-	}
+    }
 }
 
 /* Helpers to ref/unref sessions with active calls */
@@ -2092,12 +2094,14 @@ int janus_sip_init(janus_callbacks *callback, const char *config_path) {
 
 	/* Setup sofia */
 	su_init();
+    /* streamworks we're does not need
 	if(notify_events && callback->events_is_enabled()) {
 		JANUS_LOG(LOG_WARN, "sofia-sip logs are going to be redirected and they will not be shown in the process output\n");
-		/* Enable the transport logging, as we want to have access to the SIP messages */
-		setenv("TPORT_LOG", "1", 1);
+		// Enable the transport logging, as we want to have access to the SIP messages
 		su_log_redirect(NULL, janus_sip_sofia_logger, NULL);
+		setenv("TPORT_LOG", "1", 1);
 	}
+    */
 
 	sessions = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)janus_sip_session_destroy);
 	identities = g_hash_table_new(g_str_hash, g_str_equal);
@@ -5149,8 +5153,9 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 
 	/* Notify event handlers about the content of the whole incoming SIP message, if any */
 	// streamworks
-	if(notify_events && gateway->events_is_enabled() /* && ssip */) {
-		/* Print the incoming message */
+    /* we're does not need 
+	if(notify_events && gateway->events_is_enabled()) {
+		// Print the incoming message
 		size_t msg_size = 0;
 		msg_t *msg = nua_current_request(nua);
 		if(msg) {
@@ -5162,6 +5167,7 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			su_free(ssip->s_home, msg_str);
 		}
 	}
+    */
 
 	switch (event) {
 	/* Status or Error Indications */
@@ -5928,12 +5934,33 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				g_free(messageid);
 			}
 			break;
+			
 		case nua_r_refer: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
 			/* We got a response to our REFER */
 			JANUS_LOG(LOG_VERB, "Response to REFER received\n");
+			// streamworks
+			if (status >= 400){
+				/* Notify the application */
+				json_t *notify = json_object();
+				json_object_set_new(notify, "sip", json_string("event"));
+				json_object_set_new(notify, "call_id", json_string(sip->sip_call_id->i_id));
+				json_t *result = json_object();
+				json_object_set_new(result, "event", json_string("notify"));
+				json_object_set_new(result, "notify", json_string("refer"));
+				json_object_set_new(result, "substate", json_string("terminated"));
+				json_object_set_new(result, "content-type", json_string("message/sipfrag"));
+				char content[100];
+				g_snprintf(content, sizeof(content), "SIP/2.0 %d %s", status, phrase);
+				json_object_set_new(result, "content", json_string(content));
+				json_object_set_new(notify, "result", result);
+				int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, notify, NULL);
+				JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
+				json_decref(notify);
+			}
 			break;
 		}
+
 		case nua_r_invite: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
 
