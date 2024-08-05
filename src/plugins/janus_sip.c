@@ -6184,6 +6184,25 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			if(update && !session->media.earlymedia && !session->media.update) {
 				/* Don't push to the application if this is in response to a hold/unhold we sent ourselves */
 				JANUS_LOG(LOG_VERB, "This is an update to an existing call (possibly in response to hold/unhold)\n");
+
+                // streamworks due to janus not handling failed to holding/resuming
+				/* Notify the application */
+				json_t *notify = json_object();
+				json_object_set_new(notify, "sip", json_string("event"));
+				json_object_set_new(notify, "call_id", json_string(sip->sip_call_id->i_id));
+				json_t *result = json_object();
+				json_object_set_new(result, "event", json_string("notify"));
+				json_object_set_new(result, "notify", json_string("reinvite"));
+				json_object_set_new(result, "substate", json_string("active"));
+				json_object_set_new(result, "content-type", json_string("message/sipfrag"));
+				char content[100];
+				g_snprintf(content, sizeof(content), "SIP/2.0 %d %s", status, phrase);
+				json_object_set_new(result, "content", json_string(content));
+				json_object_set_new(notify, "result", result);
+				int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, notify, NULL);
+				JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
+				json_decref(notify);
+
 				janus_sdp_destroy(sdp);
 				break;
 			}
