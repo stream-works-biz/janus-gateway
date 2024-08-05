@@ -6069,7 +6069,26 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			} else if(status == 700) {
 				JANUS_LOG(LOG_VERB, "Handling SDP answer in ACK\n");
 			} else if(status >= 400 && status != 700) {
-				janus_sip_save_reason(sip, session);
+			    // streamworks
+				if (session->status == janus_sip_call_status_incall_reinviting) { 
+    				/* Notify the application */
+	    			json_t *notify = json_object();
+		    		json_object_set_new(notify, "sip", json_string("event"));
+			    	json_object_set_new(notify, "call_id", json_string(sip->sip_call_id->i_id));
+				    json_t *result = json_object();
+				    json_object_set_new(result, "event", json_string("notify"));
+				    json_object_set_new(result, "notify", json_string("reinvite"));
+				    json_object_set_new(result, "substate", json_string("pending"));
+				    json_object_set_new(result, "content-type", json_string("message/sipfrag"));
+				    char content[100];
+				    g_snprintf(content, sizeof(content), "SIP/2.0 %d %s", status, phrase);
+				    json_object_set_new(result, "content", json_string(content));
+				    json_object_set_new(notify, "result", result);
+				    int ret = gateway->push_event(session->handle, &janus_sip_plugin, session->transaction, notify, NULL);
+				    JANUS_LOG(LOG_VERB, "  >> Pushing event to peer: %d (%s)\n", ret, janus_get_api_error(ret));
+				    json_decref(notify);
+			    }
+                janus_sip_save_reason(sip, session);
 				break;
 			}
 			if(ssip == NULL) {
