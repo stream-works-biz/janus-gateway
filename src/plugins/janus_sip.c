@@ -6069,8 +6069,20 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			} else if(status == 700) {
 				JANUS_LOG(LOG_VERB, "Handling SDP answer in ACK\n");
 			} else if(status >= 400 && status != 700) {
-			    // streamworks
+			    // streamworks Handle failed to HoldCall 
 				if (session->status == janus_sip_call_status_incall_reinviting) { 
+				    if (session->media.on_hold){
+					    session->media.on_hold = FALSE;
+					    janus_sdp_mline *m = janus_sdp_mline_find(session->sdp, JANUS_SDP_AUDIO);
+					    if(m) {
+						    m->direction = session->media.pre_hold_audio_dir;
+				    	}
+					    m = janus_sdp_mline_find(session->sdp, JANUS_SDP_VIDEO);
+					    if(m) {
+						    m->direction = session->media.pre_hold_video_dir;
+					    }
+				    }
+
     				/* Notify the application */
 	    			json_t *notify = json_object();
 		    		json_object_set_new(notify, "sip", json_string("event"));
