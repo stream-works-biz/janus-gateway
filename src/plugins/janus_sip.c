@@ -5221,22 +5221,17 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 	janus_sip_session *session = (janus_sip_session *)(hmagic ? hmagic : magic);
 	ssip_t *ssip = session->stack;
 
-	// streamworks
+    // streamworks
 	if(ssip == NULL){
-		JANUS_LOG(LOG_ERR, "[%s][%s]: %d %s no sip stack\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
-		return;
-	}
-	if(session->handle == NULL){
-		JANUS_LOG(LOG_ERR, "[%s][%s]: %d %s no handle\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+		JANUS_LOG(LOG_ERR, "[%s]: %d %s no sip stack\n",nua_event_name(event), status, phrase ? phrase : "??");
 		return;
 	}
 
-	janus_mutex_lock(&ssip->smutex);
-	if (event != nua_r_shutdown){
-		if(g_atomic_int_get(&session->handle->stopped)){
-			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s session already terminated\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
-			janus_mutex_unlock(&ssip->smutex);
-			return;
+	if(g_atomic_int_get(&session->destroyed)){
+        // already unkown account
+		JANUS_LOG(LOG_VERB, "%d %s session already destroyed\n",status, phrase ? phrase : "??");
+        if (event != nua_r_shutdown){
+            return;
 		}
 	}
 
@@ -5394,8 +5389,6 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			/* We're only interested in this when there's been an offerless INVITE, as here's where we'd get our answer */
 			if(sip->sip_payload && sip->sip_payload->pl_data) {
 				JANUS_LOG(LOG_VERB, "This ACK contains a payload, probably as a result of an offerless INVITE: simulating 200 OK...\n");
-				// streamworks
-				janus_mutex_unlock(&ssip->smutex);
 				janus_sip_sofia_callback(nua_r_invite, 700, "ACK", nua, magic, nh, hmagic, sip, tags);
 				return;
 			}
@@ -5470,9 +5463,6 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 					nua_handle_bind(nh, helper);
 					/* This session won't need the reference anymore, the helper will */
 					janus_sip_unref_active_call(session);
-
-					// streamworks
-					janus_mutex_unlock(&ssip->smutex);
 					janus_sip_sofia_callback(event, status, phrase, nua, magic, nh, helper, sip, tags);
 					return;
 				}
@@ -5753,8 +5743,6 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
 			/* We expect a payload */
 			if(!sip->sip_content_type || !sip->sip_content_type->c_type || !sip->sip_payload || !sip->sip_payload->pl_data) {
-				// streamworks
-				janus_mutex_unlock(&ssip->smutex);
 				return;
 			}
 			const char *type = sip->sip_content_type->c_type;
@@ -5788,8 +5776,6 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
 			/* We expect a payload */
 			if(!sip->sip_content_type || !sip->sip_content_type->c_type || !sip->sip_payload || !sip->sip_payload->pl_data) {
-				// streamworks
-				janus_mutex_unlock(&ssip->smutex);
 				return;
 			}
 			const char *content_type = sip->sip_content_type->c_type;
@@ -5824,8 +5810,6 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			/* We expect a payload */
 			if(!sip) {
 				/* No SIP message? Maybe an internal message? */
-				// streamworks
-				janus_mutex_unlock(&ssip->smutex);
 				return;
 			}
 			if(!sip->sip_payload || !sip->sip_payload->pl_data) {
@@ -5834,8 +5818,6 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				    /* Send a 200 back and ignore the message */
 					nua_respond(nh, 200, sip_status_phrase(200), TAG_END());
 				}
-				// streamworks
-				janus_mutex_unlock(&ssip->smutex);
 				return;
 			}
 			/* Notify the application */
@@ -5913,9 +5895,6 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 				}
 				janus_mutex_unlock(&session->mutex);
 				/* End the event loop: su_root_run() will return */
-
-				// streamworks
-				janus_mutex_unlock(&ssip->smutex);
 				su_root_break(ssip->s_root);
 				return;
 			}
@@ -6673,9 +6652,6 @@ auth_failed:
 			JANUS_LOG(LOG_ERR, "Unknown event %d (%s)\n", event, nua_event_name(event));
 			break;
 	}
-
-	// streamworks
-	janus_mutex_unlock(&ssip->smutex);
 }
 
 void janus_sip_save_reason(sip_t const *sip, janus_sip_session *session) {
