@@ -5390,6 +5390,10 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 	/* SIP requests */
 		case nua_i_ack: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* We're only interested in this when there's been an offerless INVITE, as here's where we'd get our answer */
 			if(sip->sip_payload && sip->sip_payload->pl_data) {
 				JANUS_LOG(LOG_VERB, "This ACK contains a payload, probably as a result of an offerless INVITE: simulating 200 OK...\n");
@@ -5412,8 +5416,12 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			break;
 		}
 		case nua_i_invite:
-		case nua_i_update: {	/* ibrid added following nua_i_update */
+		case nua_i_update: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* Add a reference for this call */
 			janus_sip_ref_active_call(session);
 			if(ssip == NULL) {
@@ -5659,6 +5667,10 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 		}
 		case nua_i_refer: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* We're being asked to transfer a call */
 			if(sip == NULL || sip->sip_refer_to == NULL) {
 				JANUS_LOG(LOG_ERR, "Missing Refer-To header\n");
@@ -6025,6 +6037,10 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			
 		case nua_r_refer: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* We got a response to our REFER */
 			JANUS_LOG(LOG_VERB, "Response to REFER received\n");
 			// streamworks
@@ -6051,7 +6067,10 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 
 		case nua_r_invite: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
-
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* If this INVITE was triggered by a REFER, notify the transferer */
 			if(session->refer_id > 0) {
 				janus_mutex_lock(&sessions_mutex);
@@ -6565,6 +6584,10 @@ auth_failed:
 		}
 		case nua_r_subscribe: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			if(status == 200 || status == 202) {
 				/* Success */
 				json_t *event = json_object();
