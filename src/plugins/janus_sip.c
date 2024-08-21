@@ -5226,11 +5226,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 		JANUS_LOG(LOG_ERR, "[%s]: %d %s no sip stack\n",nua_event_name(event), status, phrase ? phrase : "??");
 		return;
 	}
-	if(sip == NULL || status >= 900){
-		JANUS_LOG(LOG_ERR, "[%s]: %d %s no sip:%p or status error\n",nua_event_name(event), status, phrase ? phrase : "??",sip);
+	if(status >= 900){
+		JANUS_LOG(LOG_ERR, "[%s]: %d %s status error\n",nua_event_name(event), status, phrase ? phrase : "??",sip);
 		return;
 	}
-
+	
 	if(g_atomic_int_get(&session->destroyed)){
         // already unkown account
 		JANUS_LOG(LOG_VERB, "%d %s session already destroyed\n",status, phrase ? phrase : "??");
@@ -5745,6 +5745,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 		}
 		case nua_i_info: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			// streamworks maybe sip sesssion termianted
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* We expect a payload */
 			if(!sip->sip_content_type || !sip->sip_content_type->c_type || !sip->sip_payload || !sip->sip_payload->pl_data) {
 				return;
@@ -5778,6 +5783,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 		}
 		case nua_i_message: {
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			// streamworks maybe sip sesssion termianted
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* We expect a payload */
 			if(!sip->sip_content_type || !sip->sip_content_type->c_type || !sip->sip_payload || !sip->sip_payload->pl_data) {
 				return;
@@ -5814,6 +5824,7 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			/* We expect a payload */
 			if(!sip) {
 				/* No SIP message? Maybe an internal message? */
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
 				return;
 			}
 			if(!sip->sip_payload || !sip->sip_payload->pl_data) {
@@ -5919,6 +5930,11 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 			break;
 		case nua_r_message:
 			JANUS_LOG(LOG_VERB, "[%s][%s]: %d %s\n", session->account.username, nua_event_name(event), status, phrase ? phrase : "??");
+			// streamworks maybe sip sesssion termianted
+			if(!sip) {
+				JANUS_LOG(LOG_WARN, "[%s]: %d %s no sip\n",nua_event_name(event), status, phrase ? phrase : "??");
+				return;
+			}
 			/* Handle authentication for SIP MESSAGE - eg. SippySoft Softswitch requires 401 authentication even if SIP user is registered */
 			if(status == 401 || status == 407) {
 				const char *scheme = NULL;
