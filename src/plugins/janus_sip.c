@@ -5227,7 +5227,7 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 		return;
 	}
 	if(status >= 900){
-		JANUS_LOG(LOG_ERR, "[%s]: %d %s status error\n",nua_event_name(event), status, phrase ? phrase : "??",sip);
+		JANUS_LOG(LOG_ERR, "[%s]: %d %s status error\n",nua_event_name(event), status, phrase ? phrase : "??");
 		return;
 	}
 	
