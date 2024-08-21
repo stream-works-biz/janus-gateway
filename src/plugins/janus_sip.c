@@ -5226,6 +5226,10 @@ void janus_sip_sofia_callback(nua_event_t event, int status, char const *phrase,
 		JANUS_LOG(LOG_ERR, "[%s]: %d %s no sip stack\n",nua_event_name(event), status, phrase ? phrase : "??");
 		return;
 	}
+	if(sip == NULL || status >= 900){
+		JANUS_LOG(LOG_ERR, "[%s]: %d %s no sip:%p or status error\n",nua_event_name(event), status, phrase ? phrase : "??",sip);
+		return;
+	}
 
 	if(g_atomic_int_get(&session->destroyed)){
         // already unkown account
